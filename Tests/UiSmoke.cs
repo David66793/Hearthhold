@@ -38,11 +38,11 @@ internal static class UiSmoke
             using (GameWindow game = new GameWindow(true))
             {
                 GameSession session = Session(game);
-                Render(game, "01-home");
+                Render(game, "41-native-home-v062");
                 int gold = session.Village.Gold;
                 Click(game, 130, 365);
                 Check(session.Village.Gold > gold, "Resource collection via visible button");
-                Render(game, "01-home");
+                Render(game, "41-native-home-v062");
                 int initialCount = session.Village.Buildings.Count;
                 Click(game, 100, 805); // Gold mine card.
                 ClickWorld(game, 8.25f, 23.25f, 0);
@@ -86,7 +86,7 @@ internal static class UiSmoke
                 Check(session.Village.HasClaimed("builder"), "Ready achievement reward can be claimed from campaign panel");
                 Click(game, 720, 726);
                 Check(!(bool)typeof(GameWindow).GetField("showCampaign", Hidden).GetValue(game), "Campaign panel can be dismissed");
-                Key(game, Keys.T); Render(game, "26-native-training-v06");
+                Key(game, Keys.T); Render(game, "42-native-training-v062");
                 Check((bool)typeof(GameWindow).GetField("showTraining", Hidden).GetValue(game), "T opens formation and training panel");
                 int trainingGold = session.Village.Gold;
                 Click(game, 415, 477);

@@ -190,15 +190,23 @@ namespace Hearthhold.Core
         {
             if (Battle != null || preset < 0 || preset >= Rules.FormationCounts.Length) return false;
             AdvanceTraining(utcNow);
-            if (Village.ArmyHousing > 0 || Village.TrainingQueue.Count > 0) { Notice = "预设只用于空编队。可先出征或手动遣散、取消现有队列。"; return false; }
-            int[] counts = Rules.FormationCounts[preset]; int cost = 0, housing = 0;
-            for (int i = 0; i < counts.Length; i++) { cost += counts[i] * Rules.Troops[i].TrainCost; housing += counts[i] * Rules.Troops[i].Housing; }
-            if (housing > Village.ArmyCapacity) { Notice = "当前远征营容量不足以使用该预设。"; return false; }
-            if (Village.Gold < cost) { Notice = "需要 " + cost + " 金币训练整支" + Rules.FormationNames[preset] + "。"; return false; }
+            int[] counts = Rules.FormationCounts[preset], missing = new int[counts.Length];
+            int cost = 0, housing = 0, soldiers = 0;
+            for (int i = 0; i < counts.Length; i++)
+            {
+                missing[i] = Math.Max(0, counts[i] - Village.ArmyCounts[i] - Village.QueuedCount((TroopKind)i));
+                cost += missing[i] * Rules.Troops[i].TrainCost;
+                housing += missing[i] * Rules.Troops[i].Housing;
+                soldiers += missing[i];
+            }
+            if (soldiers == 0) { Notice = Rules.FormationNames[preset] + "已达到目标人数，无需补兵。"; return false; }
+            if (Village.ArmyHousing + Village.QueuedHousing + housing > Village.ArmyCapacity)
+            { Notice = "补齐" + Rules.FormationNames[preset] + "需要 " + housing + " 营位；请调整现有编队或扩建远征营。"; return false; }
+            if (Village.Gold < cost) { Notice = "补齐" + Rules.FormationNames[preset] + "需要 " + cost + " 金币，当前只有 " + Village.Gold + "。"; return false; }
             Village.Gold -= cost;
-            for (int i = 0; i < counts.Length; i++) for (int n = 0; n < counts[i]; n++) Village.TrainingQueue.Add(i);
-            Village.TrainingStartedUtcTicks = utcNow.Ticks;
-            Notice = Rules.FormationNames[preset] + "已排入队列 · 共 " + housing + " 营位。";
+            if (Village.TrainingQueue.Count == 0) Village.TrainingStartedUtcTicks = utcNow.Ticks;
+            for (int i = 0; i < missing.Length; i++) for (int n = 0; n < missing[i]; n++) Village.TrainingQueue.Add(i);
+            Notice = Rules.FormationNames[preset] + "已补入 " + soldiers + " 名士兵 · " + housing + " 营位。";
             return true;
         }
         public void BeginBattle()
@@ -243,9 +251,17 @@ namespace Hearthhold.Core
             }
             Village.Gold = Math.Min(Village.Capacity, Village.Gold + Battle.GoldReward);
             Village.Crystal = Math.Min(Village.Capacity, Village.Crystal + Battle.CrystalReward);
+            int emergencyGold = 0;
+            if (Battle.Started && Village.ArmyHousing == 0 && Village.QueuedHousing == 0 && Village.Gold < 80)
+            {
+                emergencyGold = 80 - Village.Gold;
+                Village.Gold += emergencyGold;
+            }
             if (Battle.Stars > 0) Village.Wins++;
             bool record = Village.RecordMission(Battle.Mission, Battle.Stars, Battle.Destruction);
-            Notice = "远征结束：" + Battle.Stars + " 星，获得 " + Battle.GoldReward + " 金币。" + (record ? " 新的战役纪录已保存。" : "");
+            Notice = "远征结束：" + Battle.Stars + " 星，获得 " + Battle.GoldReward + " 金币。"
+                + (emergencyGold > 0 ? " 营地应急补给 " + emergencyGold + " 金币用于重新训练。" : "")
+                + (record ? " 新的战役纪录已保存。" : "");
             return true;
         }
         public void ReturnHome()
@@ -261,6 +277,15 @@ namespace Hearthhold.Core
             Battle = null;
             Notice = "未结算的远征已放弃，出征阵容已返回营地。";
             return true;
+        }
+        public VillageData SnapshotForSave()
+        {
+            if (Battle == null || Battle.Settled) return Village;
+            // An interrupted expedition is not resumed; preserve its full pre-deployment roster.
+            VillageData snapshot = Village.CopyForSave();
+            for (int i = 0; i < Battle.Available.Length; i++) snapshot.ArmyCounts[i] += Battle.Available[i];
+            foreach (Unit unit in Battle.Units) snapshot.ArmyCounts[(int)unit.Kind]++;
+            return snapshot;
         }
     }
 

@@ -319,8 +319,29 @@ internal static class CoreTests
         Check(preset.Battle != null && preset.Battle.Available[0] == 7 && preset.Battle.Available[2] == 4 && preset.Battle.InitialHousing == 45, "Battle receives the selected trained composition");
         preset.Battle.Deploy(TroopKind.Vanguard, 9500, 18000); preset.Battle.Finish(); preset.Settle();
         Check(preset.Village.ArmyCounts[0] == 6 && preset.Village.ArmyCounts[2] == 4, "Only deployed troops are consumed and unused reserves return home");
-        preset.ReturnHome(); for (int i = 0; i < preset.Village.ArmyCounts.Count; i++) preset.Village.ArmyCounts[i] = 0;
+        preset.ReturnHome();
+        Check(preset.QueueFormation(1, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
+            "A formation preset refills only the soldier lost on the previous attack");
+        Check(!preset.QueueFormation(1, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
+            "Repeated preset clicks do not duplicate an already queued replacement");
+        GameSession lastSappers = NewSession();
+        for (int i = 0; i < lastSappers.Village.ArmyCounts.Count; i++) lastSappers.Village.ArmyCounts[i] = 0;
+        lastSappers.Village.ArmyCounts[(int)TroopKind.Sapper] = 4;
+        Check(lastSappers.QueueFormation(0, DateTime.UtcNow) && lastSappers.Village.ArmyHousing + lastSappers.Village.QueuedHousing == 45,
+            "Balanced preset refills a post-battle roster containing only four surviving sappers");
+        preset.Village.TrainingQueue.Clear();
+        for (int i = 0; i < preset.Village.ArmyCounts.Count; i++) preset.Village.ArmyCounts[i] = 0;
         preset.BeginBattle(); Check(preset.Battle == null, "Empty formation cannot start an expedition");
+        GameSession exhausted = NewSession(); exhausted.Village.Gold = 0; exhausted.BeginBattle();
+        for (int kind = 0; kind < exhausted.Battle.Available.Length; kind++)
+        {
+            int count = exhausted.Battle.Available[kind];
+            for (int i = 0; i < count; i++) exhausted.Battle.Deploy((TroopKind)kind, 500, 500);
+        }
+        exhausted.Battle.Finish(); exhausted.ReturnHome();
+        Check(exhausted.Village.ArmyHousing == 0 && exhausted.Village.Gold >= 80,
+            "A fully spent army earns enough expedition pay to train a small replacement squad");
+        Check(exhausted.QueueTroop(TroopKind.Vanguard, DateTime.UtcNow), "Training remains available after the full army was deployed");
         GameSession capacity = NewSession(); foreach (Building b in capacity.Village.Buildings) if (b.Kind == BuildingKind.Barracks) b.Level = 2;
         Check(capacity.Village.ArmyCapacity == 60, "Upgrading the expedition camp increases army capacity");
 
@@ -343,6 +364,17 @@ internal static class CoreTests
         bool restored = abandoned.AbandonBattle();
         for (int i = 0; i < originalArmy.Length; i++) restored &= abandoned.Village.ArmyCounts[i] == originalArmy[i];
         Check(restored && abandoned.Battle == null && abandoned.Village.Wins == 0, "Abandoning an uncommitted battle restores the full roster without rewards");
+
+        GameSession interrupted = NewSession(); int[] departureArmy = interrupted.Village.ArmyCounts.ToArray();
+        interrupted.BeginBattle(); interrupted.Battle.Deploy(TroopKind.Vanguard, 500, 500);
+        VillageData safeSnapshot = interrupted.SnapshotForSave();
+        bool snapshotMatches = interrupted.Village.ArmyHousing == 0 && safeSnapshot.ArmyHousing == 45;
+        for (int i = 0; i < departureArmy.Length; i++) snapshotMatches &= safeSnapshot.ArmyCounts[i] == departureArmy[i];
+        string interruptedPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "village.xml");
+        SaveStore.Save(interruptedPath, safeSnapshot);
+        string recoveryMessage; VillageData restartedVillage = SaveStore.Load(interruptedPath, out recoveryMessage);
+        Check(snapshotMatches && restartedVillage.ArmyHousing == 45,
+            "Autosave during combat restores the departure army after an interrupted game");
 
         VillageData invalid = VillageData.Create(); invalid.TrainingQueue.Add(99); bool rejected = false;
         try { SaveStore.Validate(invalid); } catch (InvalidDataException) { rejected = true; }

@@ -77,7 +77,7 @@ if ($Action -eq 'Build') {
     if ($Package) {
         $taskReleaseReadme = Join-Path $taskRoot 'release\UNITY-README.txt'
         if (-not (Test-Path -LiteralPath $taskReleaseReadme -PathType Leaf)) { throw ('Unity release guide is missing: ' + $taskReleaseReadme) }
-        $taskPackage = Join-Path $taskRoot 'artifacts\Hearthhold-0.6.1-unity-win-x64.zip'
+        $taskPackage = Join-Path $taskRoot 'artifacts\Hearthhold-0.6.2-unity-win-x64.zip'
         $taskPackageInputs = @(Get-ChildItem -LiteralPath (Split-Path -Parent $taskPlayer) | Where-Object Name -ne 'Hearthhold_BackUpThisFolder_ButDontShipItWithYourGame' | ForEach-Object FullName)
         $taskPackageInputs += $taskReleaseReadme
         Compress-Archive -LiteralPath $taskPackageInputs -DestinationPath $taskPackage -Force

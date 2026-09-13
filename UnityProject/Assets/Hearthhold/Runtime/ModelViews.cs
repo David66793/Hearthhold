@@ -11,7 +11,8 @@ namespace Hearthhold.UnityClient
     {
         private readonly Dictionary<string, Mesh> meshes = new Dictionary<string, Mesh>();
         private readonly Dictionary<Texture2D, Material> spriteMaterials = new Dictionary<Texture2D, Material>();
-        private Material material;
+        private Material material, contactShadowMaterial;
+        private Mesh contactShadowMesh;
         public GameObject Building(Building building, Transform parent)
         {
             string key = "building:" + building.Kind + ":" + building.Level;
@@ -40,6 +41,7 @@ namespace Hearthhold.UnityClient
             if (root == null) return;
             foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>())
             {
+                if (renderer.gameObject.name == "Ground contact shadow") continue;
                 MaterialPropertyBlock properties = new MaterialPropertyBlock();
                 renderer.GetPropertyBlock(properties);
                 properties.SetColor("_BaseColor", color);
@@ -95,13 +97,16 @@ namespace Hearthhold.UnityClient
             }
             Texture2D image = Resources.Load<Texture2D>(resource);
             if (image == null) return;
-            Rect crop = new Rect(0, 0, image.width, image.height);
-            float height = width * image.height / image.width;
+            float bottomTrim = kind == BuildingKind.Keep ? 0.045f : kind == BuildingKind.Cannon ? 0.075f : 0.06f;
+            Rect crop = new Rect(0, 0, image.width, image.height * (1 - bottomTrim));
+            float height = width * crop.height / image.width;
             GameObject sprite = SpriteObject("Generated " + kind + " art", image, crop, width, height,
                 SpriteMaterial(image, "Generated " + kind + " material", false), root.transform);
             float size = Rules.Spec(kind).Size;
             sprite.transform.localPosition = new Vector3(size * 0.5f, 0.03f, size * 0.5f);
-            root.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            root.GetComponent<MeshRenderer>().enabled = false;
+            AddContactShadow(root, size * 0.92f, size * 0.75f, new Vector3(size * 0.5f, 0.025f, size * 0.5f));
+            root.AddComponent<ModelActionAnimator>().Visual = sprite.transform;
         }
         private void AddTroopSprite(GameObject root, TroopKind kind)
         {
@@ -120,7 +125,36 @@ namespace Hearthhold.UnityClient
                 SpriteMaterial(atlas, "Generated troop material", true), root.transform);
             sprite.transform.localPosition = new Vector3(0, 0.03f, 0);
             sprite.AddComponent<FixedIsometricBillboard>();
-            root.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            root.GetComponent<MeshRenderer>().enabled = false;
+            AddContactShadow(root, 0.95f, 0.6f, new Vector3(0, 0.02f, 0));
+            root.AddComponent<ModelActionAnimator>().Visual = sprite.transform;
+        }
+        private void AddContactShadow(GameObject root, float width, float depth, Vector3 position)
+        {
+            if (contactShadowMaterial == null)
+            {
+                Material template = Resources.Load<Material>("ContactShadowPalette");
+                if (template == null) return;
+                contactShadowMaterial = new Material(template);
+            }
+            if (contactShadowMesh == null)
+            {
+                contactShadowMesh = new Mesh { name = "Soft contact shadow" };
+                contactShadowMesh.vertices = new[] { new Vector3(-0.5f, -0.5f, 0), new Vector3(0.5f, -0.5f, 0), new Vector3(-0.5f, 0.5f, 0), new Vector3(0.5f, 0.5f, 0) };
+                contactShadowMesh.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) };
+                contactShadowMesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+                contactShadowMesh.RecalculateBounds();
+            }
+            GameObject shadow = new GameObject("Ground contact shadow");
+            shadow.transform.SetParent(root.transform, false);
+            shadow.transform.localPosition = position;
+            shadow.transform.localRotation = Quaternion.Euler(-90, 0, 0);
+            shadow.transform.localScale = new Vector3(width, depth, 1);
+            shadow.AddComponent<MeshFilter>().sharedMesh = contactShadowMesh;
+            MeshRenderer renderer = shadow.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = contactShadowMaterial;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
         }
         private GameObject SpriteObject(string name, Texture2D atlas, Rect crop, float width, float height, Material spriteMaterial, Transform parent)
         {
@@ -166,12 +200,81 @@ namespace Hearthhold.UnityClient
         {
             foreach (Mesh mesh in meshes.Values) Object.Destroy(mesh);
             meshes.Clear(); if (material != null) Object.Destroy(material);
+            if (contactShadowMaterial != null) Object.Destroy(contactShadowMaterial);
+            if (contactShadowMesh != null) Object.Destroy(contactShadowMesh);
             foreach (Material spriteMaterial in spriteMaterials.Values) Object.Destroy(spriteMaterial);
             spriteMaterials.Clear();
         }
     }
     internal sealed class FixedIsometricBillboard : MonoBehaviour
     {
-        private void LateUpdate() { transform.rotation = Quaternion.Euler(45, 45, 0); }
+        public float RollDegrees;
+        private void LateUpdate() { transform.rotation = Quaternion.Euler(45, 45, 0) * Quaternion.Euler(0, 0, RollDegrees); }
+    }
+
+    // Moves the visible art on impact while the simulation and collider stay at their exact positions.
+    internal sealed class ModelActionAnimator : MonoBehaviour
+    {
+        public Transform Visual;
+        private FixedIsometricBillboard billboard;
+        private Vector3 restPosition, restScale, direction;
+        private Quaternion restRotation;
+        private float elapsed, duration;
+        private bool ready, attacking, building;
+
+        private void EnsureReady()
+        {
+            if (ready || Visual == null) return;
+            restPosition = Visual.localPosition;
+            restScale = Visual.localScale;
+            restRotation = Visual.localRotation;
+            billboard = Visual.GetComponent<FixedIsometricBillboard>();
+            building = GetComponent<BuildingHandle>() != null;
+            ready = true;
+        }
+        public void Attack(Vector3 targetWorld)
+        {
+            EnsureReady();
+            if (!ready) return;
+            direction = transform.InverseTransformDirection(targetWorld - transform.position);
+            direction.y = 0;
+            if (direction.sqrMagnitude < 0.001f) direction = Vector3.forward;
+            direction.Normalize();
+            attacking = true; elapsed = 0; duration = building ? 0.34f : 0.29f;
+        }
+        public void Hit()
+        {
+            EnsureReady();
+            if (!ready || attacking) return;
+            direction = Vector3.forward;
+            attacking = false; elapsed = 0; duration = 0.22f;
+        }
+        private void Update()
+        {
+            if (!ready) EnsureReady();
+            if (!ready || duration <= 0) return;
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float strength = Mathf.Sin(t * Mathf.PI);
+            float move = attacking ? building ? -0.24f * strength : (t < 0.27f ? -0.2f * strength : 0.58f * strength) : -0.14f * strength;
+            Visual.localPosition = restPosition + direction * move + Vector3.up * (attacking && !building ? 0.09f * strength : -0.055f * strength);
+            Visual.localScale = Vector3.Scale(restScale, new Vector3(1 + (attacking ? 0.13f : -0.08f) * strength, 1 - (attacking ? 0.16f : 0.07f) * strength, 1));
+            float roll = (attacking ? 9f : -5f) * strength * (direction.x >= 0 ? 1 : -1);
+            if (billboard != null) billboard.RollDegrees = roll;
+            else Visual.localRotation = restRotation * Quaternion.Euler(0, 0, roll);
+            if (t < 1) return;
+            duration = 0; attacking = false;
+            Visual.localPosition = restPosition; Visual.localScale = restScale;
+            if (billboard != null) billboard.RollDegrees = 0;
+            else Visual.localRotation = restRotation;
+        }
+        private void OnDisable()
+        {
+            duration = 0;
+            if (!ready) return;
+            Visual.localPosition = restPosition; Visual.localScale = restScale;
+            if (billboard != null) billboard.RollDegrees = 0;
+            else Visual.localRotation = restRotation;
+        }
     }
 }

@@ -122,7 +122,7 @@ namespace Hearthhold.Preview
                 Button(g, "− 遣散", new RectangleF(cx + 13, y + 337, (cardWidth - 31) / 2, 30), delegate { if (Session.DismissTroop(capturedKind)) Persist(); }, false, false);
                 Button(g, "+ 训练", new RectangleF(cx + 18 + (cardWidth - 31) / 2, y + 337, (cardWidth - 31) / 2, 30), delegate { if (Session.QueueTroop(capturedKind, DateTime.UtcNow)) Persist(); }, true, false);
             }
-            TextAt(g, "空编队可一键安排预设；不同配比会改变破墙、承伤与远程输出。", x + 28, y + 402, 12, Muted, false);
+            TextAt(g, "点击预设可补齐战后缺员；当前剩余 " + (Session.Village.ArmyCapacity - ready - queued) + " 营位。", x + 28, y + 402, 12, Muted, false);
             float presetWidth = (width - 70) / 3;
             for (int i = 0; i < Rules.FormationNames.Length; i++)
             {
@@ -131,7 +131,8 @@ namespace Hearthhold.Preview
             }
             Button(g, "取消队尾训练并退款", new RectangleF(x + 25, y + 489, (width - 60) / 2, 38), delegate { if (Session.CancelLastTraining(DateTime.UtcNow)) Persist(); }, false, false);
             Button(g, "返回聚落", new RectangleF(x + 35 + (width - 60) / 2, y + 489, (width - 60) / 2, 38), delegate { showTraining = false; }, true, false);
-            TextAt(g, "训练按真实时间推进，离线时间也会结算；远征期间队列暂停。升级或增建远征营可扩容。", x + 29, y + 549, 11, Muted, false);
+            TextAt(g, Session.Notice, x + 29, y + 547, 12, Gold, false);
+            TextAt(g, "训练按真实时间推进，离线时间也会结算。营位不足可调整编队或扩建远征营。", x + 29, y + 579, 11, Muted, false);
         }
         private void DrawBattleBrief(Graphics g)
         {

@@ -75,7 +75,7 @@ namespace Hearthhold.UnityClient
             Light sun = new GameObject("Afternoon sun").AddComponent<Light>();
             sun.type = LightType.Directional; sun.intensity = 1.25f; sun.color = new Color32(255, 225, 181, 255);
             sun.transform.rotation = Quaternion.Euler(48, -38, 0);
-            sun.shadows = LightShadows.Soft; sun.shadowStrength = 0.82f;
+            sun.shadows = LightShadows.Soft; sun.shadowStrength = 0.56f;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
             RenderSettings.ambientSkyColor = new Color32(116, 143, 146, 255);
             RenderSettings.ambientEquatorColor = new Color32(82, 105, 94, 255);
@@ -113,6 +113,13 @@ namespace Hearthhold.UnityClient
             int captureFrame = smokeBattle ? 90 : smokeDeploy ? 40 : 20;
             if (smokeFrames == captureFrame)
             {
+                if (smokeBattle && (troopActionsPresented == 0 || defenseActionsPresented == 0))
+                {
+                    Debug.LogError("HEARTHHOLD_ACTION_SMOKE_FAILED: troop=" + troopActionsPresented + " defense=" + defenseActionsPresented);
+                    Application.Quit(6);
+                    return;
+                }
+                if (smokeBattle) Debug.Log("HEARTHHOLD_ACTION_SMOKE_READY: troop=" + troopActionsPresented + " defense=" + defenseActionsPresented);
                 if (smokeDeploy)
                 {
                     bool visualReady = unitViews.Count == 1;
@@ -339,7 +346,7 @@ namespace Hearthhold.UnityClient
         private void Save()
         {
             if (session == null) return;
-            try { SaveStore.Save(savePath, session.Village); } catch (Exception ex) { session.Notice = "保存失败：" + ex.Message; Debug.LogError(ex); }
+            try { SaveStore.Save(savePath, session.SnapshotForSave()); } catch (Exception ex) { session.Notice = "保存失败：" + ex.Message; Debug.LogError(ex); }
         }
         private void OnApplicationQuit() { if (session != null && session.Battle != null && !session.Battle.Settled) session.AbandonBattle(); Save(); }
         private void OnApplicationPause(bool pause) { if (pause) Save(); }

@@ -106,13 +106,14 @@ namespace Hearthhold.UnityClient
                     if (GUI.Button(new Rect(cx + 10, y + 287, (cardWidth - 25) / 2, 38), "− 遣散")) { if (session.DismissTroop(kind)) Save(); }
                     if (GUI.Button(new Rect(cx + 15 + (cardWidth - 25) / 2, y + 287, (cardWidth - 25) / 2, 38), "+ 训练")) { if (session.QueueTroop(kind, System.DateTime.UtcNow)) Save(); }
                 }
-                GUI.Label(new Rect(x + 25, y + 361, w - 50, 26), "空编队可一键安排预设；配比会改变破墙、承伤与远程输出。", small);
+                GUI.Label(new Rect(x + 25, y + 361, w - 50, 26), "点击预设可补齐战后缺员；当前剩余 " + (session.Village.ArmyCapacity - ready - queued) + " 营位。", small);
                 float presetWidth = (w - 70) / 3;
                 for (int i = 0; i < Rules.FormationNames.Length; i++)
                     if (GUI.Button(new Rect(x + 25 + i * (presetWidth + 10), y + 393, presetWidth, 43), Rules.FormationNames[i])) { if (session.QueueFormation(i, System.DateTime.UtcNow)) Save(); }
                 if (GUI.Button(new Rect(x + 25, y + 466, (w - 60) / 2, 43), "取消队尾训练并退款")) { if (session.CancelLastTraining(System.DateTime.UtcNow)) Save(); }
                 if (GUI.Button(new Rect(x + 35 + (w - 60) / 2, y + 466, (w - 60) / 2, 43), "返回聚落")) showTraining = false;
-                GUI.Label(new Rect(x + 25, y + 536, w - 50, 63), "训练按真实时间推进，离线时间也会结算；远征期间队列暂停。\n升级或增建远征营可扩容。", small);
+                GUI.Label(new Rect(x + 25, y + 532, w - 50, 28), session.Notice, label);
+                GUI.Label(new Rect(x + 25, y + 573, w - 50, 46), "训练按真实时间推进，离线时间也会结算。\n营位不足可调整编队或扩建远征营。", small);
             }
             else if (showArmyGuide)
             {

@@ -42,7 +42,7 @@ namespace Hearthhold.Preview
         public GameWindow(bool renderOnly)
         {
             preview = renderOnly;
-            Text = "篝火堡垒 · Hearthhold | Windows 可玩原型 0.6.1";
+            Text = "篝火堡垒 · Hearthhold | Windows 可玩原型 0.6.2";
             ClientSize = new Size(1440, 900);
             MinimumSize = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterScreen;
@@ -106,7 +106,7 @@ namespace Hearthhold.Preview
         private void Persist()
         {
             if (preview || Session.Battle != null && !Session.Battle.Settled) return;
-            try { SaveStore.Save(savePath, Session.Village); if (persistentWarning.StartsWith("保存失败")) persistentWarning = ""; }
+            try { SaveStore.Save(savePath, Session.SnapshotForSave()); if (persistentWarning.StartsWith("保存失败")) persistentWarning = ""; }
             catch (Exception ex) { persistentWarning = "保存失败：" + ex.Message; Session.Notice = persistentWarning; }
         }
         private bool IsHud(Point p)
@@ -265,7 +265,7 @@ namespace Hearthhold.Preview
             DrawEmblem(g, 45, 43);
             TextAt(g, "篝火堡垒", 77, 16, 26, Cream, true);
             TextAt(g, "H E A R T H H O L D", 79, 52, 11, Gold, true);
-            TextAt(g, "WINDOWS 原型 / 0.6.1", 285, 39, 11, Muted, false);
+            TextAt(g, "WINDOWS 原型 / 0.6.2", 285, 39, 11, Muted, false);
             Resource(g, w - 660, 20, "金币", Session.Village.Gold, Gold, false);
             Resource(g, w - 448, 20, "晶露", Session.Village.Crystal, Mint, true);
             Button(g, "操作 / F1", new RectangleF(w - 232, 25, 95, 42), delegate { showHelp = !showHelp; }, false, showHelp);

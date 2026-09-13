@@ -14,6 +14,7 @@ namespace Hearthhold.UnityClient
         private int placementPreviewLevel;
         private Transform effectsRoot, deploymentRoot;
         private Mesh ringMesh;
+        private int troopActionsPresented, defenseActionsPresented;
 
         private void InitializePresentation()
         {
@@ -116,6 +117,7 @@ namespace Hearthhold.UnityClient
         private void ResetBattlePresentation()
         {
             presentedEffects.Clear();
+            troopActionsPresented = defenseActionsPresented = 0;
             if (effectsRoot != null) for (int i = effectsRoot.childCount - 1; i >= 0; i--) Destroy(effectsRoot.GetChild(i).gameObject);
             if (deploymentRoot != null) deploymentRoot.gameObject.SetActive(session.Battle != null);
             if (selectionMarker != null) selectionMarker.SetActive(false);
@@ -133,12 +135,14 @@ namespace Hearthhold.UnityClient
                 Vector3 end = new Vector3(effect.EndX / 1000f, 1.15f, effect.EndZ / 1000f);
                 if (effect.Kind == 0)
                 {
+                    AnimateUnitAttack(effect.X, effect.Z, end);
                     SpawnArrow(start + Vector3.up * 0.15f, end, Gold, 0.2f, 0.42f);
                     SpawnBurst(end, Gold, 3, 0.7f, 0.32f);
                     FlashBuilding(effect.EndX, effect.EndZ, Color.white);
                 }
                 else if (effect.Kind == 1)
                 {
+                    AnimateBuildingAttack(effect.X, effect.Z, end);
                     SpawnProjectile(start + Vector3.up * 0.65f, end, Ember, 0.28f, 1.35f);
                     SpawnBurst(start + Vector3.up * 0.65f, new Color32(255, 204, 104, 255), 5, 1.25f, 0.28f);
                     SpawnBurst(end, Ember, 8, 1.8f, 0.55f);
@@ -146,6 +150,7 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 2)
                 {
+                    AnimateUnitAttack(effect.X, effect.Z, end);
                     SpawnPulse(end + Vector3.down, Ember, 0.2f, 0.95f, 0.16f);
                     SpawnBurst(end, new Color32(255, 214, 126, 255), 4, 0.8f, 0.28f);
                     FlashBuilding(effect.EndX, effect.EndZ, Danger);
@@ -169,6 +174,7 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 5)
                 {
+                    AnimateBuildingAttack(effect.X, effect.Z, end);
                     SpawnArrow(start + Vector3.up * 1.75f, end, new Color32(255, 196, 83, 255), 0.17f, 0.3f);
                     SpawnBurst(start + Vector3.up * 1.75f, Gold, 3, 0.65f, 0.2f);
                     SpawnBurst(end, Gold, 3, 0.75f, 0.3f);
@@ -241,7 +247,37 @@ namespace Hearthhold.UnityClient
         private void FlashBuilding(int x, int z, Color color)
         {
             foreach (Building building in session.Battle.Buildings)
-                if (building.CenterX == x && building.CenterZ == z && buildingViews.ContainsKey(building.Id)) { Flash(buildingViews[building.Id], color); return; }
+                if (building.CenterX == x && building.CenterZ == z && buildingViews.ContainsKey(building.Id))
+                {
+                    GameObject view = buildingViews[building.Id];
+                    Flash(view, color);
+                    ModelActionAnimator action = view.GetComponent<ModelActionAnimator>(); if (action != null) action.Hit();
+                    return;
+                }
+        }
+
+        private void AnimateBuildingAttack(int x, int z, Vector3 target)
+        {
+            foreach (Building building in session.Battle.Buildings)
+                if (building.CenterX == x && building.CenterZ == z && buildingViews.ContainsKey(building.Id))
+                {
+                    ModelActionAnimator action = buildingViews[building.Id].GetComponent<ModelActionAnimator>();
+                    if (action != null) { action.Attack(target); defenseActionsPresented++; }
+                    return;
+                }
+        }
+
+        private void AnimateUnitAttack(int x, int z, Vector3 target)
+        {
+            Unit nearest = null; long best = long.MaxValue;
+            foreach (Unit unit in session.Battle.Units)
+            {
+                long dx = unit.X - x, dz = unit.Z - z, distance = dx * dx + dz * dz;
+                if (distance < best) { best = distance; nearest = unit; }
+            }
+            if (nearest == null || best > 1000000L || !unitViews.ContainsKey(nearest.Id)) return;
+            ModelActionAnimator action = unitViews[nearest.Id].GetComponent<ModelActionAnimator>();
+            if (action != null) { action.Attack(target); troopActionsPresented++; }
         }
 
         private void FlashUnit(int x, int z, Color color)
@@ -252,7 +288,12 @@ namespace Hearthhold.UnityClient
                 long dx = unit.X - x, dz = unit.Z - z, distance = dx * dx + dz * dz;
                 if (distance < best) { best = distance; nearest = unit; }
             }
-            if (nearest != null && best < 4000000L && unitViews.ContainsKey(nearest.Id)) Flash(unitViews[nearest.Id], color);
+            if (nearest != null && best < 4000000L && unitViews.ContainsKey(nearest.Id))
+            {
+                GameObject view = unitViews[nearest.Id];
+                Flash(view, color);
+                ModelActionAnimator action = view.GetComponent<ModelActionAnimator>(); if (action != null) action.Hit();
+            }
         }
 
         private static void Flash(GameObject target, Color color)
@@ -286,7 +327,7 @@ namespace Hearthhold.UnityClient
             for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Vanguard, 9000, 17500 + i * 1200);
             for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Ranger, 7500, 17000 + i * 1400);
             for (int i = 0; i < 240 && !session.Battle.Finished; i++) session.Battle.Step();
-            session.Notice = "0.6.1 战斗验收：全图点击吸附部署、新兵种美术与分型特效。";
+            session.Notice = "0.6.2 战斗验收：投兵、兵种出手和防御后坐动作。";
         }
 
         private void PrepareDeploySmoke()
@@ -305,7 +346,7 @@ namespace Hearthhold.UnityClient
                 return;
             }
             Debug.Log("HEARTHHOLD_DEPLOY_SMOKE_READY: central battlefield click snapped to a legal deployment cell.");
-            session.Notice = "0.6.1 投兵验收：点击基地中心，铁卫已自动从最近绿色战线入场。";
+            session.Notice = "0.6.2 投兵验收：点击基地中心，铁卫已自动从最近绿色战线入场。";
         }
 
         private void PrepareCampaignSmoke()
@@ -316,7 +357,7 @@ namespace Hearthhold.UnityClient
             session.Village.Wins = 3;
             session.MissionIndex = 3;
             selected = -1; showCampaign = true;
-            session.Notice = "0.6.1 战役进度验收：逐关解锁、最佳纪录与成就奖励。";
+            session.Notice = "0.6.2 战役进度验收：逐关解锁、最佳纪录与成就奖励。";
         }
 
         private void PrepareTrainingSmoke()
@@ -325,14 +366,14 @@ namespace Hearthhold.UnityClient
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             selected = -1; showTraining = true;
-            session.Notice = "0.6.1 编队验收：营位、训练成本、队列与三种战术预设。";
+            session.Notice = "0.6.2 编队验收：营位、战后补齐与三种战术预设。";
         }
 
         private void PrepareHomeSmoke()
         {
             foreach (Building building in session.Village.Buildings)
                 if (building.Kind == BuildingKind.Keep) { selected = building.Id; break; }
-            session.Notice = "0.6.1 聚落验收：新建筑画面、旧存档兼容与建造信息。";
+            session.Notice = "0.6.2 聚落验收：建筑贴地接触阴影与旧存档兼容。";
         }
 
         private void DisposePresentation()
@@ -395,7 +436,13 @@ namespace Hearthhold.UnityClient
         private void Update()
         {
             if (remaining <= 0) return;
-            if (targets == null) targets = GetComponentsInChildren<Renderer>();
+            if (targets == null)
+            {
+                List<Renderer> visible = new List<Renderer>();
+                foreach (Renderer candidate in GetComponentsInChildren<Renderer>())
+                    if (candidate.gameObject.name != "Ground contact shadow") visible.Add(candidate);
+                targets = visible.ToArray();
+            }
             if (targets.Length == 0) return;
             if (properties == null) properties = new MaterialPropertyBlock();
             remaining = Mathf.Max(0, remaining - Time.deltaTime);

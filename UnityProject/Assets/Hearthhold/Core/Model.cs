@@ -165,6 +165,12 @@ namespace Hearthhold.Core
         public List<int> ArmyCounts = new List<int>();
         public List<int> TrainingQueue = new List<int>();
         public long TrainingStartedUtcTicks;
+        public VillageData CopyForSave()
+        {
+            VillageData copy = (VillageData)MemberwiseClone();
+            copy.ArmyCounts = new List<int>(ArmyCounts);
+            return copy;
+        }
         public static VillageData Create()
         {
             VillageData v = new VillageData();
