@@ -39,8 +39,8 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode)
     Write-Output ($Name + ' smoke test passed: ' + $taskShot + ' (' + $taskImage.Length + ' bytes)')
 }
 
-if ($Case -eq 'All' -or $Case -eq 'Home') { Invoke-HearthholdSmoke 'home-v062' '36-unity-home-v062.png' 'Home' }
-if ($Case -eq 'All' -or $Case -eq 'Campaign') { Invoke-HearthholdSmoke 'campaign-v062' '37-unity-campaign-v062.png' 'Campaign' }
-if ($Case -eq 'All' -or $Case -eq 'Training') { Invoke-HearthholdSmoke 'training-v062' '38-unity-training-v062.png' 'Training' }
-if ($Case -eq 'All' -or $Case -eq 'Battle') { Invoke-HearthholdSmoke 'battle-v062' '39-unity-battle-v062.png' 'Battle' }
-if ($Case -eq 'All' -or $Case -eq 'Deploy') { Invoke-HearthholdSmoke 'deploy-v062' '40-unity-deploy-v062.png' 'Deploy' }
+if ($Case -eq 'All' -or $Case -eq 'Home') { Invoke-HearthholdSmoke 'home-v063' '43-unity-home-v063.png' 'Home' }
+if ($Case -eq 'All' -or $Case -eq 'Campaign') { Invoke-HearthholdSmoke 'campaign-v063' '44-unity-campaign-v063.png' 'Campaign' }
+if ($Case -eq 'All' -or $Case -eq 'Training') { Invoke-HearthholdSmoke 'training-v063' '45-unity-training-v063.png' 'Training' }
+if ($Case -eq 'All' -or $Case -eq 'Battle') { Invoke-HearthholdSmoke 'battle-v063' '46-unity-battle-v063.png' 'Battle' }
+if ($Case -eq 'All' -or $Case -eq 'Deploy') { Invoke-HearthholdSmoke 'deploy-v063' '47-unity-deploy-v063.png' 'Deploy' }

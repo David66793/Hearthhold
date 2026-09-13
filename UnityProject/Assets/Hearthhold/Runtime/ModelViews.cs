@@ -84,26 +84,27 @@ namespace Hearthhold.UnityClient
         private void AddBuildingSprite(GameObject root, BuildingKind kind)
         {
             if (kind == BuildingKind.Wall) return;
-            string resource; float width;
+            string resource; float width, bottomTrim;
             switch (kind)
             {
-                case BuildingKind.Keep: resource = "GeneratedArt/KeepV061"; width = 5.8f; break;
-                case BuildingKind.Mine: resource = "GeneratedArt/MineV061"; width = 4.35f; break;
-                case BuildingKind.Reservoir: resource = "GeneratedArt/ReservoirV061"; width = 4.15f; break;
-                case BuildingKind.Barracks: resource = "GeneratedArt/BarracksV061"; width = 4.45f; break;
-                case BuildingKind.Cannon: resource = "GeneratedArt/CannonV061"; width = 3.75f; break;
-                case BuildingKind.Watchtower: resource = "GeneratedArt/WatchtowerV061"; width = 3.25f; break;
+                case BuildingKind.Keep: resource = "GeneratedArt/KeepV061"; width = 5.8f; bottomTrim = 0.047f; break;
+                case BuildingKind.Mine: resource = "GeneratedArt/MineV061"; width = 4.35f; bottomTrim = 0.067f; break;
+                case BuildingKind.Reservoir: resource = "GeneratedArt/ReservoirV061"; width = 4.15f; bottomTrim = 0.115f; break;
+                case BuildingKind.Barracks: resource = "GeneratedArt/BarracksV061"; width = 4.45f; bottomTrim = 0.067f; break;
+                case BuildingKind.Cannon: resource = "GeneratedArt/CannonV061"; width = 3.75f; bottomTrim = 0.083f; break;
+                case BuildingKind.Watchtower: resource = "GeneratedArt/WatchtowerV061"; width = 3.25f; bottomTrim = 0.037f; break;
                 default: return;
             }
             Texture2D image = Resources.Load<Texture2D>(resource);
             if (image == null) return;
-            float bottomTrim = kind == BuildingKind.Keep ? 0.045f : kind == BuildingKind.Cannon ? 0.075f : 0.06f;
             Rect crop = new Rect(0, 0, image.width, image.height * (1 - bottomTrim));
             float height = width * crop.height / image.width;
             GameObject sprite = SpriteObject("Generated " + kind + " art", image, crop, width, height,
                 SpriteMaterial(image, "Generated " + kind + " material", false), root.transform);
             float size = Rules.Spec(kind).Size;
-            sprite.transform.localPosition = new Vector3(size * 0.5f, 0.03f, size * 0.5f);
+            // The painted front corner is the contact point; the ground shadow stays at the logical footprint center.
+            float paintedFoot = size * 0.37f;
+            sprite.transform.localPosition = new Vector3(paintedFoot, 0.03f, paintedFoot);
             root.GetComponent<MeshRenderer>().enabled = false;
             AddContactShadow(root, size * 0.92f, size * 0.75f, new Vector3(size * 0.5f, 0.025f, size * 0.5f));
             root.AddComponent<ModelActionAnimator>().Visual = sprite.transform;

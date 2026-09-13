@@ -102,7 +102,7 @@ namespace Hearthhold.UnityClient
                 placementPreviewKind = kind; placementPreviewLevel = level;
             }
             placementPreview.SetActive(true);
-            placementPreview.transform.position = new Vector3(x, 0.08f, z);
+            placementPreview.transform.position = new Vector3(x, 0, z);
             float pulse = 1 + Mathf.Sin(Time.unscaledTime * 5) * 0.012f;
             placementPreview.transform.localScale = Vector3.one * pulse;
             ModelViews.Tint(placementPreview, valid ? new Color(0.72f, 1, 0.82f) : new Color(1, 0.3f, 0.27f));
@@ -327,7 +327,7 @@ namespace Hearthhold.UnityClient
             for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Vanguard, 9000, 17500 + i * 1200);
             for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Ranger, 7500, 17000 + i * 1400);
             for (int i = 0; i < 240 && !session.Battle.Finished; i++) session.Battle.Step();
-            session.Notice = "0.6.2 战斗验收：投兵、兵种出手和防御后坐动作。";
+            session.Notice = "0.6.3 战斗验收：贴地建筑、投兵与交战动作。";
         }
 
         private void PrepareDeploySmoke()
@@ -346,7 +346,7 @@ namespace Hearthhold.UnityClient
                 return;
             }
             Debug.Log("HEARTHHOLD_DEPLOY_SMOKE_READY: central battlefield click snapped to a legal deployment cell.");
-            session.Notice = "0.6.2 投兵验收：点击基地中心，铁卫已自动从最近绿色战线入场。";
+            session.Notice = "0.6.3 投兵验收：点击基地中心，铁卫已自动从最近绿色战线入场。";
         }
 
         private void PrepareCampaignSmoke()
@@ -357,7 +357,7 @@ namespace Hearthhold.UnityClient
             session.Village.Wins = 3;
             session.MissionIndex = 3;
             selected = -1; showCampaign = true;
-            session.Notice = "0.6.2 战役进度验收：逐关解锁、最佳纪录与成就奖励。";
+            session.Notice = "0.6.3 战役进度验收：逐关解锁、最佳纪录与成就奖励。";
         }
 
         private void PrepareTrainingSmoke()
@@ -366,14 +366,14 @@ namespace Hearthhold.UnityClient
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             selected = -1; showTraining = true;
-            session.Notice = "0.6.2 编队验收：营位、战后补齐与三种战术预设。";
+            session.Notice = "0.6.3 编队验收：营位、战后补齐与三种战术预设。";
         }
 
         private void PrepareHomeSmoke()
         {
             foreach (Building building in session.Village.Buildings)
                 if (building.Kind == BuildingKind.Keep) { selected = building.Id; break; }
-            session.Notice = "0.6.2 聚落验收：建筑贴地接触阴影与旧存档兼容。";
+            session.Notice = "0.6.3 聚落验收：建筑底边与实际占地对齐。";
         }
 
         private void DisposePresentation()
