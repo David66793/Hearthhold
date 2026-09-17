@@ -4,23 +4,27 @@ using System.Xml.Serialization;
 
 namespace Hearthhold.Core
 {
-    public enum BuildingKind { Keep, Mine, Reservoir, Barracks, Cannon, Watchtower, Wall }
-    public enum TroopKind { Vanguard, Ranger, Guardian, Sapper }
+    public enum BuildingKind { Keep, Mine, Reservoir, Barracks, Cannon, Watchtower, Wall, TrainingCamp, Laboratory, Mortar, AirDefense, ArcTower, BeamTower }
+    public enum TroopKind { Vanguard, Ranger, Guardian, Sapper, SkyRider, Alchemist, Medic, Summoner }
 
     public sealed class BuildingSpec
     {
         public string Name, Description;
-        public int Size, Health, Cost, Damage, Range, Cooldown;
-        public BuildingSpec(string name, string description, int size, int health, int cost, int damage, int range, int cooldown)
-        { Name = name; Description = description; Size = size; Health = health; Cost = cost; Damage = damage; Range = range; Cooldown = cooldown; }
+        public int Size, Health, Cost, Damage, Range, Cooldown, MinRange, SplashRadius;
+        public bool TargetsGround = true, TargetsAir, RampDamage;
+        public BuildingSpec(string name, string description, int size, int health, int cost, int damage, int range, int cooldown,
+            bool targetsGround = true, bool targetsAir = false, int minRange = 0, int splashRadius = 0, bool rampDamage = false)
+        { Name = name; Description = description; Size = size; Health = health; Cost = cost; Damage = damage; Range = range; Cooldown = cooldown; TargetsGround = targetsGround; TargetsAir = targetsAir; MinRange = minRange; SplashRadius = splashRadius; RampDamage = rampDamage; }
     }
 
     public sealed class TroopSpec
     {
         public string Name, Role;
-        public int Health, Damage, Range, Speed, Cooldown, Count, Housing, TrainCost, TrainSeconds;
-        public TroopSpec(string name, string role, int health, int damage, int range, int speed, int cooldown, int count, int housing, int trainCost, int trainSeconds)
-        { Name = name; Role = role; Health = health; Damage = damage; Range = range; Speed = speed; Cooldown = cooldown; Count = count; Housing = housing; TrainCost = trainCost; TrainSeconds = trainSeconds; }
+        public int Health, Damage, Range, Speed, Cooldown, Count, Housing, TrainCost, TrainSeconds, SplashRadius, HealPower, SummonCooldown;
+        public bool Flying, PreferDefenses, PreferWalls;
+        public TroopSpec(string name, string role, int health, int damage, int range, int speed, int cooldown, int count, int housing, int trainCost, int trainSeconds,
+            bool flying = false, bool preferDefenses = false, bool preferWalls = false, int splashRadius = 0, int healPower = 0, int summonCooldown = 0)
+        { Name = name; Role = role; Health = health; Damage = damage; Range = range; Speed = speed; Cooldown = cooldown; Count = count; Housing = housing; TrainCost = trainCost; TrainSeconds = trainSeconds; Flying = flying; PreferDefenses = preferDefenses; PreferWalls = preferWalls; SplashRadius = splashRadius; HealPower = healPower; SummonCooldown = summonCooldown; }
         public string Description, Tactics, Weakness;
     }
 
@@ -35,7 +39,7 @@ namespace Hearthhold.Core
     public static class Achievements
     {
         public static readonly AchievementSpec[] Specs = {
-            new AchievementSpec("builder", "营火初盛", "聚落拥有18座建筑", 18, 220, 40),
+            new AchievementSpec("builder", "营火初盛", "聚落拥有20座建筑", 20, 220, 40),
             new AchievementSpec("keep_two", "石垒新城", "将议事堡升到2级", 2, 320, 90),
             new AchievementSpec("first_victory", "远征初捷", "赢得1次远征", 1, 260, 80),
             new AchievementSpec("ten_stars", "星火征途", "战役累计获得10颗星", 10, 520, 160),
@@ -63,25 +67,58 @@ namespace Hearthhold.Core
             new BuildingSpec("议事堡", "聚落的中心。升级后提高其他建筑的等级上限。", 4, 2200, 0, 0, 0, 0),
             new BuildingSpec("金矿", "持续产出金币。点击收取，将离线收益收入仓库。", 3, 650, 180, 0, 0, 0),
             new BuildingSpec("晶露池", "收集用于建筑升级的晶露。", 3, 600, 160, 0, 0, 0),
-            new BuildingSpec("远征营", "训练远征士兵并提供营位；升级可提高编队容量。", 3, 800, 240, 0, 0, 0),
-            new BuildingSpec("重弩炮", "强力单体防御，擅长击退重甲目标。", 2, 850, 220, 38, 6500, 24),
-            new BuildingSpec("哨塔", "视野开阔、射程更远的防御塔。", 2, 650, 200, 19, 8000, 15),
-            new BuildingSpec("石墙", "阻挡地面部队，迫使对手绕行或破墙。", 1, 430, 20, 0, 0, 0)
+            new BuildingSpec("兵营", "提供部队营位；每座1级兵营提供45营位，每升级增加15营位。", 3, 800, 240, 0, 0, 0),
+            new BuildingSpec("重弩炮", "地面单体重击；克制高血量前排，但无法攻击空军。", 2, 850, 220, 44, 6500, 24),
+            new BuildingSpec("哨塔", "地空通用远射；火力稳定但缺少群体伤害。", 2, 650, 200, 19, 8000, 15, true, true),
+            new BuildingSpec("石墙", "阻挡地面部队，迫使对手绕行或破墙。", 1, 430, 20, 0, 0, 0),
+            new BuildingSpec("训练营", "负责训练队列与兵种解锁：1级先锋/游侠，2级铁卫，3级破城手。", 3, 700, 300, 0, 0, 0),
+            new BuildingSpec("实验室", "研究兵种与四类战术法术；科技等级不超过实验室等级。", 3, 700, 320, 0, 0, 0),
+            new BuildingSpec("投石台", "超远地面范围攻击，有3格近距盲区。", 3, 780, 360, 70, 10500, 42, true, false, 3000, 2100),
+            new BuildingSpec("猎空弩", "只攻击空中目标，单次伤害很高。", 2, 720, 340, 105, 8500, 25, false, true),
+            new BuildingSpec("风暴塔", "中程地空范围电弧，惩罚密集军团。", 2, 900, 380, 42, 6500, 18, true, true, 0, 2200),
+            new BuildingSpec("灼光塔", "持续锁定同一目标时伤害逐步升高。", 2, 900, 440, 68, 7000, 8, true, true, 0, 0, true)
         };
         public static readonly TroopSpec[] Troops = {
-            new TroopSpec("先锋", "近战 · 均衡", 270, 42, 1050, 150, 15, 12, 1, 15, 2),
-            new TroopSpec("游侠", "远程 · 跨墙射击", 130, 32, 4500, 125, 17, 10, 1, 20, 2),
-            new TroopSpec("铁卫", "重甲 · 优先防御", 1300, 72, 1100, 85, 26, 3, 5, 65, 6),
-            new TroopSpec("破城手", "攻城 · 城墙特攻", 180, 36, 1100, 165, 18, 4, 2, 35, 3)
+            new TroopSpec("先锋", "近战 · 均衡", 250, 38, 1050, 150, 15, 12, 1, 15, 2),
+            new TroopSpec("游侠", "远程 · 跨墙射击", 120, 29, 4500, 125, 17, 10, 1, 20, 2),
+            new TroopSpec("铁卫", "重甲 · 优先防御", 2800, 110, 1100, 85, 24, 3, 5, 85, 8, false, true),
+            new TroopSpec("破城手", "攻城 · 城墙特攻", 210, 43, 1100, 165, 18, 4, 2, 35, 3, false, false, true),
+            new TroopSpec("翼骑", "空军 · 优先防御", 780, 100, 1250, 145, 24, 4, 4, 90, 7, true, true),
+            new TroopSpec("炼金师", "远程 · 范围轰击", 380, 75, 5200, 105, 28, 4, 3, 70, 6, false, false, false, 1700),
+            new TroopSpec("医师", "支援 · 治疗友军", 560, 0, 3800, 115, 20, 3, 4, 80, 7, false, false, false, 0, 100),
+            new TroopSpec("唤灵师", "召唤 · 数量压力", 470, 45, 4300, 100, 24, 3, 4, 95, 8, false, false, false, 0, 0, 90)
         };
-        public static readonly string[] FormationNames = { "均衡远征", "重甲破阵", "远程压制" };
+        public static readonly string[] FormationNames = { "新兵集结", "均衡远征", "重甲破阵", "远程压制", "王庭突击·75" };
         public static readonly int[][] FormationCounts = {
-            new[] { 12, 10, 3, 4 },
-            new[] { 7, 6, 4, 6 },
-            new[] { 7, 18, 2, 5 }
+            new[] { 22, 23, 0, 0, 0, 0, 0, 0 },
+            new[] { 8, 7, 3, 4, 1, 1, 0, 0 },
+            new[] { 7, 3, 4, 2, 1, 1, 1, 0 },
+            new[] { 5, 13, 2, 2, 1, 3, 0, 0 },
+            new[] { 8, 7, 5, 3, 3, 3, 1, 1 }
         };
         public static BuildingSpec Spec(BuildingKind kind) { return Buildings[(int)kind]; }
         public static TroopSpec Spec(TroopKind kind) { return Troops[(int)kind]; }
+        public static int UnlockCampLevel(TroopKind kind)
+        {
+            if (kind == TroopKind.Guardian || kind == TroopKind.SkyRider) return 2;
+            if (kind == TroopKind.Sapper || kind == TroopKind.Alchemist || kind == TroopKind.Medic || kind == TroopKind.Summoner) return 3;
+            return 1;
+        }
+        public static int TroopHealth(TroopKind kind, int level) { return Spec(kind).Health * (10 + Math.Max(0, level - 1)) / 10; }
+        public static int TroopDamage(TroopKind kind, int level) { return Spec(kind).Damage * (10 + Math.Max(0, level - 1)) / 10; }
+        public static int ResearchGold(int level) { return 180 * level; }
+        public static int ResearchCrystal(int level) { return 120 * level; }
+        public static string BuildingData(Building b)
+        {
+            string stats = "生命 " + b.MaxHealth + " · 占地 " + b.Spec.Size + "×" + b.Spec.Size;
+            if (b.Spec.Damage > 0) stats += "\n单次伤害 " + b.Spec.Damage * (b.Level + 1) / 2 + " · 射程 " + b.Spec.Range / 1000f + "格 · 间隔 " + (b.Spec.Cooldown + 1) / (float)TicksPerSecond + "秒";
+            else if (b.Kind == BuildingKind.Mine) stats += "\n产出 " + 24 * b.Level + " 金币/分";
+            else if (b.Kind == BuildingKind.Reservoir) stats += "\n产出 " + 18 * b.Level + " 晶露/分";
+            else if (b.Kind == BuildingKind.Barracks) stats += "\n营位 " + (45 + (b.Level - 1) * 15) + " · 全营总量受建造上限限制";
+            else if (b.Kind == BuildingKind.TrainingCamp) stats += "\n解锁 " + (b.Level == 1 ? "先锋、游侠" : b.Level == 2 ? "先锋、游侠、铁卫、翼骑" : "全部八种兵");
+            else if (b.Kind == BuildingKind.Laboratory) stats += "\n研究上限 " + b.Level + " 级 · 兵种生命/伤害每级约 +10%";
+            return stats;
+        }
         static Rules()
         {
             Troops[0].Description = "持剑近战步兵，攻击距离约1格。自动选择附近建筑，遇到挡路城墙会破墙。";
@@ -89,13 +126,25 @@ namespace Hearthhold.Core
             Troops[0].Weakness = "不能隔墙攻击；单兵冲进防御塔火力区容易阵亡。";
             Troops[1].Description = "持弓远程射手，射程4.5格。可以隔着城墙攻击建筑，但自身生命较低。";
             Troops[1].Tactics = "放在铁卫和先锋后方；利用射程先打掉靠外的建筑。";
-            Troops[1].Weakness = "生命只有130，别让游侠第一个吸引防御塔火力。";
-            Troops[2].Description = "持盾重甲卫士，生命1300。优先攻击重弩炮、哨塔等防御建筑。";
+            Troops[1].Weakness = "生命只有120，别让游侠第一个吸引防御塔火力。";
+            Troops[2].Description = "持盾重甲卫士，生命2800。优先攻击重弩炮、哨塔等防御建筑。";
             Troops[2].Tactics = "优先投放2—3名铁卫吸引火力，再跟进破城手和其他兵种。";
             Troops[2].Weakness = "移动慢、攻击间隔长。需要输出部队配合，不能只靠铁卫。";
             Troops[3].Description = "携带爆破器材的攻城手，优先攻击城墙；对城墙每次造成10倍伤害。";
             Troops[3].Tactics = "紧跟铁卫，从同一侧投下，打开缺口让近战部队进入基地。";
             Troops[3].Weakness = "生命较低；城墙拆完后的普通伤害有限，别作为主力输出。";
+            Troops[4].Description = "不受城墙阻挡的空中突击兵，优先攻击防御建筑。";
+            Troops[4].Tactics = "从防空薄弱侧切入，配合冻结优先拆除猎空弩。";
+            Troops[4].Weakness = "会被哨塔、猎空弩、风暴塔和灼光塔锁定，不能无脑集中投放。";
+            Troops[5].Description = "投掷炼金弹，对目标周围造成范围伤害。";
+            Troops[5].Tactics = "让铁卫先吸引火力，再用炼金师清理密集建筑。";
+            Troops[5].Weakness = "攻击慢、生命低；遭远程塔锁定时很快阵亡。";
+            Troops[6].Description = "不攻击建筑，会寻找受伤友军并进行范围治疗。";
+            Troops[6].Tactics = "跟随铁卫或主力团，延长核心推进时间。";
+            Troops[6].Weakness = "自身输出为零；带得过多会导致时间不足。";
+            Troops[7].Description = "周期召唤临时幽影战士，制造额外目标和持续压力。";
+            Troops[7].Tactics = "在前排建立后投放，让召唤物替后排分担火力。";
+            Troops[7].Weakness = "本体脆弱且启动慢，惧怕范围防御和快速突脸。";
         }
         public static int BuildLimit(BuildingKind kind, int keepLevel)
         {
@@ -105,9 +154,11 @@ namespace Hearthhold.Core
                 case BuildingKind.Keep: return 1;
                 case BuildingKind.Mine: return 2 + tier;
                 case BuildingKind.Reservoir: return 1 + tier;
-                case BuildingKind.Barracks: return tier;
+                case BuildingKind.Barracks: return 1;
                 case BuildingKind.Cannon: case BuildingKind.Watchtower: return 1 + tier;
                 case BuildingKind.Wall: return 10 + tier * 30;
+                case BuildingKind.TrainingCamp: case BuildingKind.Laboratory: return 1;
+                case BuildingKind.Mortar: case BuildingKind.AirDefense: case BuildingKind.ArcTower: case BuildingKind.BeamTower: return tier >= 2 ? 1 : 0;
                 default: return 0;
             }
         }
@@ -115,10 +166,11 @@ namespace Hearthhold.Core
 
     public sealed class Building
     {
-        public int Id, X, Z, Level = 1, Health, Cooldown;
+        public int Id, X, Z, Level = 1, Health, Cooldown, FrozenTicks, LockedUnitId = -1, LockTicks;
+        [XmlIgnore] public int BattleHealthScale = 1;
         public BuildingKind Kind;
         [XmlIgnore] public BuildingSpec Spec { get { return Rules.Spec(Kind); } }
-        [XmlIgnore] public int MaxHealth { get { return Spec.Health * (Level + 1) / 2; } }
+        [XmlIgnore] public int MaxHealth { get { return Spec.Health * (Level + 1) / 2 * BattleHealthScale; } }
         [XmlIgnore] public int CenterX { get { return X * 1000 + Spec.Size * 500; } }
         [XmlIgnore] public int CenterZ { get { return Z * 1000 + Spec.Size * 500; } }
         public Building Copy() { return (Building)MemberwiseClone(); }
@@ -139,7 +191,8 @@ namespace Hearthhold.Core
 
     public sealed class Unit
     {
-        public int Id, X, Z, Health, Cooldown, TargetId = -1, PathRevision = -1, RepathTick;
+        public int Id, X, Z, Health, Cooldown, TargetId = -1, PathRevision = -1, RepathTick, FuryTicks, SummonTicks, SummonerId = -1;
+        public bool IsSummon;
         public TroopKind Kind;
         public List<Cell> Path = new List<Cell>();
         public int PathIndex;
@@ -155,7 +208,7 @@ namespace Hearthhold.Core
 
     public sealed class VillageData
     {
-        public int Version = 1, Gold = 1600, Crystal = 700, NextId = 1, Wins;
+        public int Version = 2, Gold = 1600, Crystal = 700, NextId = 1, Wins;
         public long LastIncomeUtcTicks;
         public List<Building> Buildings = new List<Building>();
         public List<int> CampaignStars = new List<int>();
@@ -165,10 +218,14 @@ namespace Hearthhold.Core
         public List<int> ArmyCounts = new List<int>();
         public List<int> TrainingQueue = new List<int>();
         public long TrainingStartedUtcTicks;
+        public List<int> TroopLevels = new List<int>();
+        public int HealLevel = 1;
         public VillageData CopyForSave()
         {
             VillageData copy = (VillageData)MemberwiseClone();
             copy.ArmyCounts = new List<int>(ArmyCounts);
+            copy.TroopLevels = new List<int>(TroopLevels);
+            copy.TrainingQueue = new List<int>(TrainingQueue);
             return copy;
         }
         public static VillageData Create()
@@ -180,10 +237,12 @@ namespace Hearthhold.Core
             v.Add(BuildingKind.Mine, 26, 20);
             v.Add(BuildingKind.Reservoir, 23, 14);
             v.Add(BuildingKind.Barracks, 16, 23);
+            v.Add(BuildingKind.TrainingCamp, 11, 24);
+            v.Add(BuildingKind.Laboratory, 27, 15);
             v.Add(BuildingKind.Cannon, 15, 15);
             v.Add(BuildingKind.Watchtower, 23, 24);
             for (int x = 15; x <= 24; x++) v.Add(BuildingKind.Wall, x, 21);
-            v.EnsureProgress(); v.EnsureArmy();
+            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureArmy();
             return v;
         }
         public Building Add(BuildingKind kind, int x, int z)
@@ -201,6 +260,9 @@ namespace Hearthhold.Core
         public Building At(int x, int z)
         { foreach (Building b in Buildings) if (b.Contains(x, z)) return b; return null; }
         public int Count(BuildingKind kind) { int count = 0; foreach (Building b in Buildings) if (b.Kind == kind) count++; return count; }
+        [XmlIgnore] public int TrainingCampLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.TrainingCamp) level = Math.Max(level, b.Level); return level; } }
+        [XmlIgnore] public int LaboratoryLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.Laboratory) level = Math.Max(level, b.Level); return level; } }
+        public bool IsTroopUnlocked(TroopKind kind) { return TrainingCampLevel >= Rules.UnlockCampLevel(kind); }
         public int Limit(BuildingKind kind) { return Rules.BuildLimit(kind, KeepLevel); }
         public bool AtLimit(BuildingKind kind) { return Count(kind) >= Limit(kind); }
         [XmlIgnore] public int ArmyCapacity
@@ -250,11 +312,35 @@ namespace Hearthhold.Core
                 for (int i = 0; i < Rules.Troops.Length; i++)
                 {
                     int room = Math.Max(0, ArmyCapacity - used) / Rules.Troops[i].Housing;
-                    ArmyCounts[i] = Math.Min(Rules.Troops[i].Count, room);
+                    ArmyCounts[i] = IsTroopUnlocked((TroopKind)i) ? Math.Min(FormationStarterCount(i), room) : 0;
                     used += ArmyCounts[i] * Rules.Troops[i].Housing;
                 }
                 ArmyInitialized = true;
             }
+        }
+        private static int FormationStarterCount(int index) { return Rules.FormationCounts[0][index]; }
+        public void EnsureTechnology()
+        {
+            if (TroopLevels == null) TroopLevels = new List<int>();
+            while (TroopLevels.Count < Rules.Troops.Length) TroopLevels.Add(1);
+        }
+        public void MigrateLegacy()
+        {
+            if (Version != 1) return;
+            // Keep an existing four-troop roster/train queue usable after migration.
+            AddMigrationBuilding(BuildingKind.TrainingCamp, 3);
+            AddMigrationBuilding(BuildingKind.Laboratory, 1);
+            EnsureTechnology(); Version = 2;
+        }
+        private void AddMigrationBuilding(BuildingKind kind, int level)
+        {
+            if (Count(kind) > 0) return;
+            for (int radius = 0; radius < Rules.MapSize; radius++)
+                for (int z = 2; z < Rules.MapSize - 4; z++)
+                    for (int x = 2; x < Rules.MapSize - 4; x++)
+                        if (Math.Abs(x - 20) + Math.Abs(z - 20) == radius && CanPlace(kind, x, z, -1))
+                        { Building b = Add(kind, x, z); b.Level = level; b.Health = b.MaxHealth; return; }
+            throw new InvalidOperationException("旧存档没有空间安置新建筑，请先腾出位置。");
         }
         public int QueuedCount(TroopKind kind)
         { EnsureArmy(); int count = 0; foreach (int queued in TrainingQueue) if (queued == (int)kind) count++; return count; }
@@ -283,7 +369,7 @@ namespace Hearthhold.Core
     {
         public static readonly string[] Names = { "松林前哨", "河谷营地", "灰岩要塞", "双桥关", "霜木环堡", "赤土兵站", "风暴高台", "月湾城寨", "黑松迷阵", "晨火王庭" };
         public static readonly string[] Descriptions = {
-            "西侧栅线留有缺口，适合练习首次投兵。", "单一缺口由双重弩火覆盖，需要铁卫先行。", "完整外墙考验破城手与后排配合。", "横向隔墙把守军分成两个庭院。", "纵向隔墙迫使部队选择突破方向。", "十字内墙和更多资源点延长清扫路线。", "内外双环保护核心，先集中打开一侧。", "双营地与多座防御塔组成持久战。", "多重隔墙考验剩余兵力和治疗时机。", "三级王庭是当前战役终点，集中火力突破内环。"
+            "西侧栅线留有缺口，适合练习首次投兵。", "缺口由弩炮与风暴塔覆盖，分批投兵避免密集受伤。", "完整外墙与风暴塔考验破城手及后排配合。", "横向隔墙与风暴塔迫使部队选择突破方向。", "纵向隔墙迫使部队选择突破方向。", "十字内墙和更多资源点延长清扫路线。", "内外双环保护核心，先集中打开一侧。", "双营地与多座防御塔组成持久战。", "多重隔墙考验剩余兵力和治疗时机。", "三级王庭是当前战役终点，集中火力突破内环。"
         };
         public static int Count { get { return Names.Length; } }
         public static List<Building> Create(int index)
@@ -295,16 +381,17 @@ namespace Hearthhold.Core
             Add(v, BuildingKind.Mine, 14, 14, level);
             Add(v, BuildingKind.Reservoir, 24, 19, level);
             Add(v, BuildingKind.Barracks, 17, 24, level);
-            Add(v, BuildingKind.Cannon, 14, 20, level);
+            Add(v, index >= 9 ? BuildingKind.Mortar : BuildingKind.Cannon, 14, 20, level);
             Add(v, BuildingKind.Watchtower, 24, 15, level);
+            if (index >= 1 && index <= 3) Add(v, BuildingKind.ArcTower, 13, 18, level);
             if (index >= 1) Add(v, BuildingKind.Cannon, 22, 24, level);
-            if (index >= 2) Add(v, BuildingKind.Watchtower, 27, 21, level);
+            if (index >= 2) Add(v, index >= 4 ? BuildingKind.Mortar : BuildingKind.Watchtower, 27, 21, level);
             if (index >= 3) Add(v, BuildingKind.Mine, 24, 25, level);
             if (index >= 4) Add(v, BuildingKind.Reservoir, 13, 24, level);
-            if (index >= 5) Add(v, BuildingKind.Cannon, 20, 27, level);
-            if (index >= 6) Add(v, BuildingKind.Watchtower, 17, 14, level);
+            if (index >= 5) Add(v, index >= 8 ? BuildingKind.ArcTower : BuildingKind.AirDefense, 20, 27, level);
+            if (index >= 6) Add(v, index >= 8 ? BuildingKind.BeamTower : BuildingKind.ArcTower, 17, 14, level);
             if (index >= 7) Add(v, BuildingKind.Barracks, 25, 12, level);
-            if (index >= 8) Add(v, BuildingKind.Cannon, 27, 17, level);
+            if (index >= 8) Add(v, BuildingKind.BeamTower, 27, 17, level);
             if (index >= 9) Add(v, BuildingKind.Watchtower, 12, 18, level);
 
             for (int x = 11; x <= 29; x++) { Wall(v, x, 11, level); Wall(v, x, 30, level); }

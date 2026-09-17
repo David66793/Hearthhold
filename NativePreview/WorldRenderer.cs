@@ -106,7 +106,7 @@ namespace Hearthhold.Preview
                 {
                     Cell cell = Unproject(mouse);
                     if (heal) DrawRange(g, cell.X + 0.5f, cell.Z + 0.5f, 5, Mint, 2);
-                    else
+                    else if (!focusOrder)
                     {
                         int x, z;
                         if (battle.NearestDeployment(cell.X * 1000 + 500, cell.Z * 1000 + 500, out x, out z))
@@ -192,6 +192,8 @@ namespace Hearthhold.Preview
                 GroundPoly(g, Color.FromArgb(115, Gold), b.X - 0.15f, b.Z - 0.15f, size + 0.3f, size + 0.3f, 1);
                 if (b.Spec.Range > 0) DrawRange(g, b.X + size / 2, b.Z + size / 2, b.Spec.Range / 1000f, Gold, 1);
             }
+            if (battle && Session.Battle.FocusTicks > 0 && b.Id == Session.Battle.FocusTargetId)
+                GroundPoly(g, Color.FromArgb(135, Gold), b.X - 0.2f, b.Z - 0.2f, size + 0.4f, size + 0.4f, 2);
             PaintModelBuilding(g, b);
             if (b.Kind == BuildingKind.Wall)
             {
@@ -265,7 +267,7 @@ namespace Hearthhold.Preview
         }
         private void DrawUnit(Graphics g, Unit u)
         {
-            PointF p = Project(u.X / 1000f, u.Z / 1000f, 0);
+            PointF p = Project(u.X / 1000f, u.Z / 1000f, u.Spec.Flying ? 48 : 0);
             if (u.Health <= 0)
             { using (Pen cross = new Pen(Color.FromArgb(115, 208, 197, 164), 2)) { g.DrawLine(cross, p.X - 3, p.Y - 2, p.X + 3, p.Y + 2); g.DrawLine(cross, p.X + 3, p.Y - 2, p.X - 3, p.Y + 2); } return; }
             float bob = (float)Math.Sin(animation * 10 + u.Id) * 1.1f * zoom;
@@ -307,6 +309,17 @@ namespace Hearthhold.Preview
                     using (Brush mote = new SolidBrush(Color.FromArgb(Math.Min(230, effect.Ticks * 9), Mint))) g.FillEllipse(mote, px - 2, py - 2, 4, 4);
                 }
             }
+            else if (effect.Kind == 6)
+            {
+                DrawRange(g, effect.X / 1000f, effect.Z / 1000f, 2.2f, Gold, 3);
+            }
+            else if (effect.Kind >= 7 && effect.Kind <= 11)
+            {
+                Color color = effect.Kind == 7 ? Color.FromArgb(246, 150, 68) : effect.Kind == 8 ? Color.FromArgb(112, 211, 248) : effect.Kind == 9 ? Color.FromArgb(205, 146, 80) : effect.Kind == 10 ? Color.FromArgb(164, 112, 220) : Mint;
+                float radius = effect.Kind == 7 ? 4.5f : effect.Kind == 8 ? 4f : effect.Kind == 9 ? 3.6f : 1.8f;
+                DrawRange(g, effect.X / 1000f, effect.Z / 1000f, radius, color, 3);
+                if (effect.Kind == 11) using (Pen beam = new Pen(color, 2.5f)) g.DrawLine(beam, a, b);
+            }
             else
             {
                 float radius = effect.Kind == 4 ? (25 - effect.Ticks) * 1.5f * zoom : 7 * zoom;
@@ -334,7 +347,7 @@ namespace Hearthhold.Preview
         }
         private void DrawMiniBuilding(Graphics g, BuildingKind kind, float x, float y)
         {
-            Color color = kind == BuildingKind.Reservoir ? Mint : kind == BuildingKind.Barracks ? Color.FromArgb(194, 113, 78) : kind == BuildingKind.Wall ? Color.FromArgb(181, 176, 149) : Gold;
+            Color color = kind == BuildingKind.Reservoir || kind == BuildingKind.Laboratory ? Mint : kind == BuildingKind.TrainingCamp ? Color.FromArgb(77, 149, 145) : kind == BuildingKind.Barracks ? Color.FromArgb(194, 113, 78) : kind == BuildingKind.Wall ? Color.FromArgb(181, 176, 149) : Gold;
             Polygon(g, Shade(color, -20), new PointF(x - 17, y - 8), new PointF(x, y + 1), new PointF(x, y + 20), new PointF(x - 17, y + 11));
             Polygon(g, Shade(color, -45), new PointF(x, y + 1), new PointF(x + 17, y - 8), new PointF(x + 17, y + 11), new PointF(x, y + 20));
             Polygon(g, color, new PointF(x - 20, y - 8), new PointF(x, y - 26), new PointF(x + 20, y - 8), new PointF(x, y + 1));

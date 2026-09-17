@@ -23,7 +23,7 @@ namespace Hearthhold.Preview
         private double lastTime, accumulator, saveTimer, animation;
         private float zoom = 0.88f, panX, panY;
         private Point mouse, lastMouse;
-        private bool middleDrag, leftDown, heal, showHelp, showGrid, muted = true;
+        private bool middleDrag, leftDown, heal, fury, freeze, breach, focusOrder, showHelp, showGrid, muted = true;
         private double nextDeploy, nextWall;
         private int selectedId = -1, movingId = -1;
         private BuildingKind? buildKind;
@@ -42,7 +42,7 @@ namespace Hearthhold.Preview
         public GameWindow(bool renderOnly)
         {
             preview = renderOnly;
-            Text = "篝火堡垒 · Hearthhold | Windows 可玩原型 0.6.2";
+            Text = "篝火堡垒 · Hearthhold | Windows 可玩原型 0.9.0";
             ClientSize = new Size(1440, 900);
             MinimumSize = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterScreen;
@@ -94,7 +94,7 @@ namespace Hearthhold.Preview
                 if (held.Contains(Keys.S)) panY -= speed;
                 if (held.Contains(Keys.A)) panX += speed;
                 if (held.Contains(Keys.D)) panX -= speed;
-                if (leftDown && Session.Battle != null && !heal && animation > nextDeploy && !IsHud(mouse))
+                if (leftDown && Session.Battle != null && !heal && !fury && !freeze && !breach && !focusOrder && animation > nextDeploy && !IsHud(mouse))
                 { MapAction(mouse); nextDeploy = animation + 0.15; }
                 if (leftDown && Session.Battle == null && buildKind == BuildingKind.Wall && animation > nextWall && !IsHud(mouse))
                 { Cell c = Unproject(mouse); if (Session.Village.CanPlace(BuildingKind.Wall, c.X, c.Z, -1)) MapAction(mouse); nextWall = animation + 0.08; }
@@ -113,7 +113,7 @@ namespace Hearthhold.Preview
         {
             if (ModalActive || Session.Battle != null && Session.Battle.Finished) return true;
             if (p.Y < 112 || p.Y > ClientSize.Height - 184) return true;
-            if (p.X < 254 && p.Y < (Session.Battle == null ? 500 : 414)) return true;
+            if (p.X < 254 && p.Y < (Session.Battle == null ? 500 : 585)) return true;
             if (p.X > ClientSize.Width - 278 && (Session.Battle != null && p.Y < 507 || selectedId >= 0 && p.Y < 550)) return true;
             return false;
         }
@@ -133,9 +133,9 @@ namespace Hearthhold.Preview
             Cell c = Unproject(p);
             if (Session.Battle != null)
             {
-                bool success = heal ? Session.Battle.CastHeal(c.X * 1000 + 500, c.Z * 1000 + 500) : Session.Battle.DeployNearest(troopKind, c.X * 1000 + 500, c.Z * 1000 + 500);
-                if (success) { Session.Notice = heal ? "疗愈之雨 · 范围内友军恢复生命。" : Rules.Spec(troopKind).Name + "已从最近战线入场。"; if (heal) { heal = false; leftDown = false; } }
-                else Session.Notice = heal ? "需要已开战、仍有法术次数且目标位于地图内。" : "该兵种已经没有余量。";
+                bool success = heal ? Session.Battle.CastHeal(c.X * 1000 + 500, c.Z * 1000 + 500) : fury ? Session.Battle.CastFury(c.X * 1000 + 500, c.Z * 1000 + 500) : freeze ? Session.Battle.CastFreeze(c.X * 1000 + 500, c.Z * 1000 + 500) : breach ? Session.Battle.CastBreach(c.X * 1000 + 500, c.Z * 1000 + 500) : focusOrder ? Session.Battle.CastFocus(c.X * 1000 + 500, c.Z * 1000 + 500) : Session.Battle.DeployNearest(troopKind, c.X * 1000 + 500, c.Z * 1000 + 500);
+                if (success) { Session.Notice = heal ? "疗愈之雨 · 范围内友军恢复生命。" : fury ? "战吼 · 范围内友军进入狂热状态。" : freeze ? "霜封 · 范围内防御停止攻击。" : breach ? "裂地 · 范围内城墙受到重创。" : focusOrder ? "集火令已下达，部队暂时转向目标。" : Rules.Spec(troopKind).Name + "已从最近战线入场。"; if (heal || fury || freeze || breach || focusOrder) { heal = fury = freeze = breach = focusOrder = false; leftDown = false; } }
+                else Session.Notice = focusOrder ? "请点击一座存活的非城墙建筑，并确认还有集火次数。" : heal || fury || freeze || breach ? "该位置没有对应法术的有效目标，或次数已用尽。" : "该兵种已经没有余量。";
                 return;
             }
             if (movingId >= 0)
@@ -148,7 +148,7 @@ namespace Hearthhold.Preview
             }
             Building b = PickBuilding(p); selectedId = b == null ? -1 : b.Id;
         }
-        private void CancelAction() { buildKind = null; movingId = -1; heal = false; leftDown = false; selectedId = -1; showHelp = false; showArmyGuide = false; showBattleBrief = false; showCampaign = false; showTraining = false; demolishId = -1; hits.Clear(); }
+        private void CancelAction() { buildKind = null; movingId = -1; heal = fury = freeze = breach = focusOrder = false; leftDown = false; selectedId = -1; showHelp = false; showArmyGuide = false; showBattleBrief = false; showCampaign = false; showTraining = false; showResearch = false; demolishId = -1; hits.Clear(); }
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
             held.Add(e.KeyCode);
@@ -163,8 +163,12 @@ namespace Hearthhold.Preview
             if (ModalActive) return;
             if (Session.Battle != null)
             {
-                if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D4) { troopKind = (TroopKind)((int)e.KeyCode - (int)Keys.D1); heal = false; }
-                if (e.KeyCode == Keys.Q) heal = !heal;
+                if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D8) { troopKind = (TroopKind)((int)e.KeyCode - (int)Keys.D1); heal = fury = freeze = breach = focusOrder = false; }
+                if (e.KeyCode == Keys.Q) { bool next = !heal; heal = fury = freeze = breach = focusOrder = false; heal = next; }
+                if (e.KeyCode == Keys.Z) { bool next = !fury; heal = fury = freeze = breach = focusOrder = false; fury = next; }
+                if (e.KeyCode == Keys.X) { bool next = !freeze; heal = fury = freeze = breach = focusOrder = false; freeze = next; }
+                if (e.KeyCode == Keys.C) { bool next = !breach; heal = fury = freeze = breach = focusOrder = false; breach = next; }
+                if (e.KeyCode == Keys.F) { bool next = !focusOrder; heal = fury = freeze = breach = focusOrder = false; focusOrder = next; }
             }
             else
             {
@@ -224,6 +228,7 @@ namespace Hearthhold.Preview
             if (showBattleBrief) DrawBattleBrief(g);
             if (showCampaign) DrawCampaign(g);
             if (showTraining) DrawTraining(g);
+            if (showResearch) DrawResearch(g);
             if (demolishId >= 0) DrawDemolition(g);
         }
         private Font FontFor(float size, bool bold)
@@ -265,7 +270,7 @@ namespace Hearthhold.Preview
             DrawEmblem(g, 45, 43);
             TextAt(g, "篝火堡垒", 77, 16, 26, Cream, true);
             TextAt(g, "H E A R T H H O L D", 79, 52, 11, Gold, true);
-            TextAt(g, "WINDOWS 原型 / 0.6.2", 285, 39, 11, Muted, false);
+            TextAt(g, "WINDOWS 原型 / 0.9.0", 285, 39, 11, Muted, false);
             Resource(g, w - 660, 20, "金币", Session.Village.Gold, Gold, false);
             Resource(g, w - 448, 20, "晶露", Session.Village.Crystal, Mint, true);
             Button(g, "操作 / F1", new RectangleF(w - 232, 25, 95, 42), delegate { showHelp = !showHelp; }, false, showHelp);
@@ -294,12 +299,12 @@ namespace Hearthhold.Preview
         }
         private void DrawHomePanel(Graphics g)
         {
-            Panel(g, new RectangleF(24, 114, 222, 374), Color.FromArgb(238, 25, 43, 36), Color.FromArgb(86, 107, 75), 12);
+            Panel(g, new RectangleF(24, 114, 222, 415), Color.FromArgb(238, 25, 43, 36), Color.FromArgb(86, 107, 75), 12);
             TextAt(g, "你的聚落", 42, 134, 20, Cream, true);
             TextAt(g, "松风谷  /  议事堡 " + Session.Village.KeepLevel + " 级", 43, 168, 12, Muted, false);
             using (Pen p = new Pen(Color.FromArgb(67, 88, 67))) g.DrawLine(p, 43, 198, 227, 198);
             TextAt(g, "从一簇篝火，到一座堡垒", 42, 212, 12, Gold, true);
-            TextAt(g, (Session.Village.Buildings.Count > 17 ? "✓" : "○") + "  建设你的第一座建筑", 43, 244, 12, Cream, false);
+            TextAt(g, (Session.Village.Buildings.Count >= 20 ? "✓" : "○") + "  建设你的第一座建筑", 43, 244, 12, Cream, false);
             TextAt(g, (Session.Village.KeepLevel > 1 ? "✓" : "○") + "  升级议事堡", 43, 273, 12, Cream, false);
             TextAt(g, (Session.Village.Wins > 0 ? "✓" : "○") + "  远征 " + Session.Village.Wins + " 胜 · 战役 " + Session.Village.TotalStars + "/30 星", 43, 302, 12, Cream, false);
             Session.Income(DateTime.UtcNow, out cachedGold, out cachedCrystal);
@@ -307,18 +312,24 @@ namespace Hearthhold.Preview
             Button(g, "兵种 I", new RectangleF(40, 395, 91, 34), delegate { showArmyGuide = true; }, false, false);
             Button(g, "战役 / 成就", new RectangleF(139, 395, 91, 34), delegate { showCampaign = true; }, false, false);
             Button(g, "编队 / 训练  T", new RectangleF(40, 438, 190, 34), delegate { showTraining = true; }, true, false);
+            Button(g, "实验室 / 科技", new RectangleF(40, 480, 190, 34), delegate { showResearch = true; }, false, false);
         }
         private void DrawBattlePanel(Graphics g)
         {
             Battle b = Session.Battle;
-            Panel(g, new RectangleF(24, 114, 222, 290), Color.FromArgb(238, 25, 43, 36), Color.FromArgb(86, 107, 75), 12);
+            Panel(g, new RectangleF(24, 114, 222, 466), Color.FromArgb(238, 25, 43, 36), Color.FromArgb(86, 107, 75), 12);
             TextAt(g, "远征 · " + Missions.Names[b.Mission], 41, 135, 17, Cream, true);
             TextAt(g, b.Started ? "战斗进行中" : "侦察中 · 首次投兵开战", 42, 169, 12, Muted, false);
             TextAt(g, string.Format("{0:00}:{1:00}", b.SecondsLeft / 60, b.SecondsLeft % 60), 41, 200, 38, Cream, true);
             TextAt(g, "破坏率", 42, 259, 12, Muted, false);
             TextAt(g, b.Destruction + "%", 166, 252, 23, Gold, true);
             for (int i = 0; i < 3; i++) TextAt(g, i < b.Stars ? "★" : "☆", 48 + i * 58, 292, 33, Gold, true);
-            TextAt(g, "在场 " + b.AliveCount + " 人  ·  疗愈 " + b.SpellCharges + " 次", 43, 357, 12, Muted, false);
+            TextAt(g, "在场 " + b.AliveCount + " 人  ·  四类战术法术", 43, 349, 12, Muted, false);
+            Button(g, "Q 疗愈 ×" + b.SpellCharges, new RectangleF(41, 375, 88, 35), delegate { bool next = !heal; heal = fury = freeze = breach = focusOrder = false; heal = next; }, false, heal);
+            Button(g, "Z 战吼 ×" + b.FuryCharges, new RectangleF(138, 375, 88, 35), delegate { bool next = !fury; heal = fury = freeze = breach = focusOrder = false; fury = next; }, false, fury);
+            Button(g, "X 霜封 ×" + b.FreezeCharges, new RectangleF(41, 418, 88, 35), delegate { bool next = !freeze; heal = fury = freeze = breach = focusOrder = false; freeze = next; }, false, freeze);
+            Button(g, "C 裂地 ×" + b.BreachCharges, new RectangleF(138, 418, 88, 35), delegate { bool next = !breach; heal = fury = freeze = breach = focusOrder = false; breach = next; }, false, breach);
+            Button(g, "F  集火令  ×" + b.FocusCharges, new RectangleF(41, 465, 185, 38), delegate { bool next = !focusOrder; heal = fury = freeze = breach = focusOrder = false; focusOrder = next; }, false, focusOrder);
         }
         private void DrawSelection(Graphics g)
         {
@@ -327,34 +338,35 @@ namespace Hearthhold.Preview
             Panel(g, new RectangleF(x, 156, 242, 388), Color.FromArgb(242, 25, 43, 36), Color.FromArgb(86, 107, 75), 12);
             TextAt(g, b.Spec.Name, x + 18, 174, 21, Cream, true);
             TextAt(g, "等级 " + b.Level + "  /  生命 " + b.MaxHealth, x + 18, 211, 12, Gold, false);
-            TextBox(g, b.Spec.Description, new RectangleF(x + 18, 244, 206, 59), 12, Muted);
-            TextAt(g, "升级：" + Session.UpgradeGold(b) + " 金 / " + Session.UpgradeCrystal(b) + " 晶", x + 18, 314, 12, Cream, false);
-            Button(g, "升级建筑  U", new RectangleF(x + 16, 347, 210, 38), delegate { Session.Upgrade(selectedId); Persist(); }, true, false);
-            Button(g, "移动建筑  M", new RectangleF(x + 16, 395, 210, 36), delegate { movingId = selectedId; buildKind = null; Session.Notice = "选择新的位置，右键取消移动。"; }, false, movingId >= 0);
-            TextAt(g, "数量 " + Session.Village.Count(b.Kind) + " / " + Session.Village.Limit(b.Kind) + " · 上限随议事堡提升", x + 18, 443, 11, Muted, false);
-            if (b.Kind == BuildingKind.Keep) TextAt(g, "聚落核心 · 不可拆除", x + 18, 489, 13, Gold, true);
-            else Button(g, "拆除建筑  Del", new RectangleF(x + 16, 482, 210, 38), RequestDemolition, false, false);
+            TextBox(g, b.Spec.Description, new RectangleF(x + 18, 237, 206, 57), 11, Muted);
+            TextBox(g, Rules.BuildingData(b), new RectangleF(x + 18, 292, 206, 62), 11, Gold);
+            TextAt(g, "升级：" + Session.UpgradeGold(b) + " 金 / " + Session.UpgradeCrystal(b) + " 晶", x + 18, 356, 12, Cream, false);
+            Button(g, "升级建筑  U", new RectangleF(x + 16, 382, 210, 34), delegate { Session.Upgrade(selectedId); Persist(); }, true, false);
+            Button(g, b.Kind == BuildingKind.Laboratory ? "查看科技研究" : "移动建筑  M", new RectangleF(x + 16, 422, 210, 33), delegate { if (b.Kind == BuildingKind.Laboratory) showResearch = true; else { movingId = selectedId; buildKind = null; Session.Notice = "选择新的位置，右键取消移动。"; } }, false, movingId >= 0);
+            TextAt(g, "数量 " + Session.Village.Count(b.Kind) + " / " + Session.Village.Limit(b.Kind), x + 18, 465, 11, Muted, false);
+            if (b.Kind == BuildingKind.Keep) TextAt(g, "聚落核心 · 不可拆除", x + 18, 503, 13, Gold, true);
+            else Button(g, "拆除建筑  Del", new RectangleF(x + 16, 494, 210, 32), RequestDemolition, false, false);
         }
         private void DrawBuildBar(Graphics g)
         {
             int w = ClientSize.Width, h = ClientSize.Height;
             TextAt(g, "营地建设", 25, h - 167, 15, Cream, true);
             TextAt(g, "选择建筑，再点击地面放置  ·  石墙支持按住拖动", 122, h - 164, 11, Muted, false);
-            float cardWidth = (w - 318) / 6f;
-            for (int i = 0; i < 6; i++)
+            float cardWidth = (w - 318) / (Rules.Buildings.Length - 1f);
+            for (int i = 0; i < Rules.Buildings.Length - 1; i++)
             {
                 BuildingKind kind = (BuildingKind)(i + 1);
                 float x = 24 + i * cardWidth;
                 RectangleF r = new RectangleF(x, h - 132, cardWidth - 10, 91);
                 bool active = buildKind == kind;
                 Panel(g, r, active ? Color.FromArgb(56, 76, 54) : Color.FromArgb(33, 51, 42), active ? Gold : Color.FromArgb(67, 86, 65), 9);
-                PaintModelIcon(g, kind, new RectangleF(x + 3, h - 122, 51, 68));
-                TextAt(g, Rules.Spec(kind).Name, x + 59, h - 117, 13, Cream, true);
-                TextAt(g, Rules.Spec(kind).Cost + " 金币", x + 59, h - 91, 12, Gold, false);
+                PaintModelIcon(g, kind, new RectangleF(x + 3, h - 122, 42, 68));
+                TextAt(g, Rules.Spec(kind).Name, x + 45, h - 117, 11, Cream, true);
+                TextAt(g, Rules.Spec(kind).Cost + " 金币", x + 45, h - 91, 10, Gold, false);
                 bool limited = Session.Village.AtLimit(kind);
-                TextAt(g, Session.Village.Count(kind) + "/" + Session.Village.Limit(kind) + (limited ? " 已达上限" : " 已建"), x + 59, h - 67, 10, limited ? Color.Salmon : Muted, false);
+                TextAt(g, Session.Village.Count(kind) + "/" + Session.Village.Limit(kind) + (limited ? " 已满" : " 已建"), x + 45, h - 67, 9, limited ? Color.Salmon : Muted, false);
                 hits.Add(new HitRegion { Rect = r, Action = delegate {
-                    if (Session.Village.AtLimit(kind)) { Session.Notice = Rules.Spec(kind).Name + "已达数量上限。请升级议事堡或先拆除一座。"; buildKind = null; return; }
+                    if (Session.Village.AtLimit(kind)) { Session.Notice = Rules.Spec(kind).Name + "已达数量上限。" + ((kind == BuildingKind.Barracks || kind == BuildingKind.TrainingCamp || kind == BuildingKind.Laboratory) ? "该建筑只能建一座。" : "请升级议事堡或先拆除一座。"); buildKind = null; return; }
                     buildKind = kind; movingId = -1; selectedId = -1; Session.Notice = "放置" + Rules.Spec(kind).Name + " · 右键取消";
                 } });
             }
@@ -373,20 +385,19 @@ namespace Hearthhold.Preview
             int w = ClientSize.Width, h = ClientSize.Height;
             TextAt(g, "远征队", 25, h - 167, 15, Cream, true);
             TextAt(g, "数字键选兵  ·  当前编队 " + Session.Battle.InitialHousing + " 营位  ·  只有已训练士兵可投放", 111, h - 164, 11, Muted, false);
-            float cardWidth = (w - 340) / 5f;
-            for (int i = 0; i < 4; i++)
+            float cardWidth = (w - 340) / (float)Rules.Troops.Length;
+            for (int i = 0; i < Rules.Troops.Length; i++)
             {
                 TroopKind kind = (TroopKind)i;
                 float x = 24 + i * cardWidth;
                 RectangleF r = new RectangleF(x, h - 132, cardWidth - 10, 91);
-                Panel(g, r, !heal && troopKind == kind ? Color.FromArgb(56, 76, 54) : Color.FromArgb(33, 51, 42), !heal && troopKind == kind ? Gold : Color.FromArgb(67, 86, 65), 9);
-                DrawUnitIcon(g, kind, x + 29, h - 85, 1.5f);
-                TextAt(g, (i + 1) + "  " + Rules.Spec(kind).Name, x + 58, h - 119, 13, Cream, true);
-                TextAt(g, "× " + Session.Battle.Available[i], x + 58, h - 95, 18, Gold, true);
-                TextAt(g, Rules.Spec(kind).Role, x + 58, h - 67, 10, Muted, false);
-                hits.Add(new HitRegion { Rect = r, Action = delegate { troopKind = kind; heal = false; } });
+                bool selected = !heal && !fury && !freeze && !breach && !focusOrder && troopKind == kind;
+                Panel(g, r, selected ? Color.FromArgb(56, 76, 54) : Color.FromArgb(33, 51, 42), selected ? Gold : Color.FromArgb(67, 86, 65), 9);
+                TextAt(g, (i + 1) + " " + Rules.Spec(kind).Name, x + 10, h - 119, 11, Cream, true);
+                TextAt(g, "×" + Session.Battle.Available[i], x + 10, h - 94, 18, Gold, true);
+                TextAt(g, Rules.Spec(kind).Role, x + 10, h - 66, 9, Muted, false);
+                hits.Add(new HitRegion { Rect = r, Action = delegate { troopKind = kind; heal = fury = freeze = breach = focusOrder = false; } });
             }
-            Button(g, "Q  疗愈之雨  ×" + Session.Battle.SpellCharges, new RectangleF(24 + cardWidth * 4, h - 132, cardWidth - 10, 91), delegate { heal = !heal; }, false, heal);
             Button(g, "结束进攻", new RectangleF(w - 295, h - 105, 270, 57), delegate { Session.Battle.Finish(); Session.Settle(); Persist(); }, false, false);
         }
         private void DrawResult(Graphics g)
@@ -419,7 +430,7 @@ namespace Hearthhold.Preview
                 "底部建筑卡片          选择建筑，再点击地面放置",
                 "按住左键              连续铺墙 / 连续投兵",
                 "Ctrl+Z / Ctrl+Y       撤销 / 重做建筑移动",
-                "1—4 / Q               选择兵种 / 范围治疗",
+                "1—8 / QZXC / F        选择兵种 / 四类法术 / 集火",
                 "T / I                 编队训练 / 兵种图鉴与战术",
                 "C / Ctrl+S / G        收取产出 / 保存 / 网格",
                 "右键 / Esc            取消当前操作"

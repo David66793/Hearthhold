@@ -9,7 +9,7 @@ namespace Hearthhold.UnityClient
         private static readonly Color Danger = new Color32(235, 91, 78, 255);
         private static readonly Color Ember = new Color32(255, 139, 67, 255);
         private readonly HashSet<CombatEffect> presentedEffects = new HashSet<CombatEffect>();
-        private GameObject selectionMarker, deploymentMarker, placementPreview;
+        private GameObject selectionMarker, deploymentMarker, focusMarker, placementPreview;
         private BuildingKind? placementPreviewKind;
         private int placementPreviewLevel;
         private Transform effectsRoot, deploymentRoot;
@@ -23,6 +23,8 @@ namespace Hearthhold.UnityClient
             selectionMarker.SetActive(false);
             deploymentMarker = Ring("Nearest deployment point", Mint, transform);
             deploymentMarker.SetActive(false);
+            focusMarker = Ring("Ordered target", Gold, transform);
+            focusMarker.SetActive(false);
             effectsRoot = new GameObject("Battle effects").transform;
             effectsRoot.SetParent(transform, false);
             deploymentRoot = new GameObject("Deployment boundary").transform;
@@ -79,7 +81,18 @@ namespace Hearthhold.UnityClient
         }
         private void UpdateDeploymentPresentation()
         {
-            bool active = session.Battle != null && !session.Battle.Finished && !heal && !OverHud();
+            Building ordered = null;
+            if (session.Battle != null && session.Battle.FocusTicks > 0)
+                foreach (Building building in session.Battle.Buildings)
+                    if (building.Id == session.Battle.FocusTargetId && building.Health > 0) { ordered = building; break; }
+            focusMarker.SetActive(ordered != null);
+            if (ordered != null)
+            {
+                float size = ordered.Spec.Size + 0.9f + Mathf.Sin(Time.unscaledTime * 8) * 0.08f;
+                focusMarker.transform.position = new Vector3(ordered.CenterX / 1000f, 0.09f, ordered.CenterZ / 1000f);
+                focusMarker.transform.localScale = new Vector3(size, 1, size);
+            }
+            bool active = session.Battle != null && !session.Battle.Finished && !heal && !fury && !freeze && !breach && !focusOrder && !OverHud();
             Vector3 point; int x = 0, z = 0;
             active = active && GroundPoint(out point) && session.Battle.NearestDeployment(Mathf.FloorToInt(point.x) * 1000 + 500, Mathf.FloorToInt(point.z) * 1000 + 500, out x, out z);
             deploymentMarker.SetActive(active);
@@ -122,6 +135,7 @@ namespace Hearthhold.UnityClient
             if (deploymentRoot != null) deploymentRoot.gameObject.SetActive(session.Battle != null);
             if (selectionMarker != null) selectionMarker.SetActive(false);
             if (deploymentMarker != null) deploymentMarker.SetActive(false);
+            if (focusMarker != null) focusMarker.SetActive(false);
             HidePlacementPresentation();
         }
 
@@ -179,6 +193,38 @@ namespace Hearthhold.UnityClient
                     SpawnBurst(start + Vector3.up * 1.75f, Gold, 3, 0.65f, 0.2f);
                     SpawnBurst(end, Gold, 3, 0.75f, 0.3f);
                     FlashUnit(effect.EndX, effect.EndZ, Danger);
+                }
+                else if (effect.Kind == 6)
+                {
+                    Vector3 center = new Vector3(effect.X / 1000f, 0.15f, effect.Z / 1000f);
+                    SpawnPulse(center, Gold, 0.5f, 4.4f, 0.65f);
+                    SpawnMotes(center + Vector3.up * 1.3f, Gold, 10);
+                    FlashBuilding(effect.X, effect.Z, Gold);
+                }
+                else if (effect.Kind == 7)
+                {
+                    Vector3 center = new Vector3(effect.X / 1000f, 0.13f, effect.Z / 1000f);
+                    SpawnPulse(center, Ember, 0.4f, 8.5f, 0.75f); SpawnMotes(center, Gold, 18);
+                }
+                else if (effect.Kind == 8)
+                {
+                    Vector3 center = new Vector3(effect.X / 1000f, 0.13f, effect.Z / 1000f);
+                    Color ice = new Color32(122, 218, 255, 255); SpawnPulse(center, ice, 0.4f, 7.8f, 0.8f); SpawnMotes(center, ice, 16);
+                }
+                else if (effect.Kind == 9)
+                {
+                    Vector3 center = new Vector3(effect.X / 1000f, 0.16f, effect.Z / 1000f);
+                    SpawnPulse(center, new Color32(219, 159, 88, 255), 0.5f, 7.2f, 0.7f); SpawnBurst(center, Ember, 16, 2.3f, 0.8f);
+                }
+                else if (effect.Kind == 10)
+                {
+                    Vector3 center = new Vector3(effect.X / 1000f, 0.2f, effect.Z / 1000f);
+                    SpawnPulse(center, new Color32(174, 120, 235, 255), 0.2f, 2.2f, 0.5f); SpawnMotes(center, new Color32(174, 120, 235, 255), 8);
+                }
+                else if (effect.Kind == 11)
+                {
+                    AnimateUnitAttack(effect.X, effect.Z, end);
+                    SpawnPulse(end, Mint, 0.2f, 1.5f, 0.35f); SpawnMotes(end, Mint, 6); FlashUnit(effect.EndX, effect.EndZ, Mint);
                 }
             }
         }
@@ -306,6 +352,9 @@ namespace Hearthhold.UnityClient
 
         private void PrepareBattleSmoke()
         {
+            // The battle presentation fixture intentionally instantiates all eight troop roles and four spells.
+            foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.TrainingCamp) { building.Level = 3; building.Health = building.MaxHealth; }
+            for (int i = 0; i < Rules.FormationCounts[4].Length; i++) session.Village.ArmyCounts[i] = Rules.FormationCounts[4][i];
             for (int i = 0; i < Missions.Count - 1; i++) session.Village.RecordMission(i, 1, 55 + i * 3);
             session.MissionIndex = Missions.Count - 1;
             session.BeginBattle();
@@ -321,13 +370,30 @@ namespace Hearthhold.UnityClient
                 return;
             }
             Debug.Log("HEARTHHOLD_DEPLOY_SMOKE_READY: central battlefield click snapped to a legal deployment cell.");
-            int[] rows = { 17500, 19500, 21500, 23500 };
-            for (int i = 0; i < 2; i++) session.Battle.Deploy(TroopKind.Guardian, 9500, rows[i]);
-            for (int i = 0; i < 3; i++) session.Battle.Deploy(TroopKind.Sapper, 9500, 20500 + i * 700);
-            for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Vanguard, 9000, 17500 + i * 1200);
-            for (int i = 0; i < 5; i++) session.Battle.Deploy(TroopKind.Ranger, 7500, 17000 + i * 1400);
+            for (int i = 0; i < Rules.Troops.Length; i++) session.Battle.Deploy((TroopKind)i, 9500, 15000 + i * 2100);
+            session.Battle.Deploy(TroopKind.Guardian, 9500, 19000);
+            session.Battle.Deploy(TroopKind.Ranger, 8500, 20500);
+            bool breachReady = session.Battle.CastBreach(11500, 20000);
+            bool furyReady = session.Battle.CastFury(9500, 22000);
+            bool freezeReady = session.Battle.CastFreeze(18000, 15000);
+            if (!breachReady || !furyReady || !freezeReady)
+            {
+                Debug.LogError("HEARTHHOLD_SPELL_SMOKE_FAILED: one or more 0.9 tactical spells had no valid target.");
+                Application.Quit(4); return;
+            }
+            Debug.Log("HEARTHHOLD_SPELL_SMOKE_READY: breach, fury and freeze accepted valid targets.");
             for (int i = 0; i < 240 && !session.Battle.Finished; i++) session.Battle.Step();
-            session.Notice = "0.6.3 战斗验收：贴地建筑、投兵与交战动作。";
+            Building ordered = null;
+            foreach (Building building in session.Battle.Buildings)
+                if (building.Health > 0 && building.Kind != BuildingKind.Wall) { ordered = building; break; }
+            if (ordered == null || !session.Battle.CastFocus(ordered.CenterX, ordered.CenterZ))
+            {
+                Debug.LogError("HEARTHHOLD_FOCUS_SMOKE_FAILED: no live target could receive the command.");
+                Application.Quit(4);
+                return;
+            }
+            Debug.Log("HEARTHHOLD_FOCUS_SMOKE_READY: tactical target accepted.");
+            session.Notice = "0.9 战斗验收：八兵种、六种防御与四类法术。";
         }
 
         private void PrepareDeploySmoke()
@@ -337,8 +403,8 @@ namespace Hearthhold.UnityClient
             if (session.Battle == null) return;
             showBrief = false; briefSeen = true;
             RebuildBuildings();
-            focus = new Vector3(20, 0, 20); worldCamera.orthographicSize = 24; MoveCamera();
-            troop = TroopKind.Guardian;
+            focus = new Vector3(20, 0, 20); worldCamera.orthographicSize = 20; MoveCamera();
+            troop = TroopKind.Vanguard;
             if (!TryBattleActionAt(20, 20) || session.Battle.Units.Count != 1 || !session.Battle.CanDeploy(session.Battle.Units[0].X, session.Battle.Units[0].Z))
             {
                 Debug.LogError("HEARTHHOLD_DEPLOY_SMOKE_FAILED: central battlefield click did not reach a legal deployment cell.");
@@ -346,7 +412,7 @@ namespace Hearthhold.UnityClient
                 return;
             }
             Debug.Log("HEARTHHOLD_DEPLOY_SMOKE_READY: central battlefield click snapped to a legal deployment cell.");
-            session.Notice = "0.6.3 投兵验收：点击基地中心，铁卫已自动从最近绿色战线入场。";
+            session.Notice = "0.9 投兵验收：八兵种均可从绿色战线部署。";
         }
 
         private void PrepareCampaignSmoke()
@@ -366,14 +432,26 @@ namespace Hearthhold.UnityClient
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             session.QueueTroop(TroopKind.Vanguard, System.DateTime.UtcNow);
             selected = -1; showTraining = true;
-            session.Notice = "0.6.3 编队验收：营位、战后补齐与三种战术预设。";
+            session.Notice = "0.9 编队验收：八兵种、营位与五种战术预设。";
+        }
+
+        private void PrepareResearchSmoke()
+        {
+            Building lab = null;
+            foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.Laboratory) { lab = building; break; }
+            session.Upgrade(1);
+            if (lab != null) session.Upgrade(lab.Id);
+            session.ResearchTroop(TroopKind.Vanguard);
+            session.ResearchHeal();
+            selected = lab == null ? -1 : lab.Id; showResearch = true;
+            session.Notice = "0.9 科技验收：八兵种与四类法术共享规则数据。";
         }
 
         private void PrepareHomeSmoke()
         {
             foreach (Building building in session.Village.Buildings)
-                if (building.Kind == BuildingKind.Keep) { selected = building.Id; break; }
-            session.Notice = "0.6.3 聚落验收：建筑底边与实际占地对齐。";
+                if (building.Kind == BuildingKind.TrainingCamp) { selected = building.Id; break; }
+            session.Notice = "0.9 聚落验收：十三类建筑以三维网格贴地显示。";
         }
 
         private void DisposePresentation()

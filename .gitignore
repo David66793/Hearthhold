@@ -38,6 +38,15 @@ artifacts/screenshots/*
 !artifacts/screenshots/43-unity-home-v063.png
 !artifacts/screenshots/46-unity-battle-v063.png
 !artifacts/screenshots/47-unity-deploy-v063.png
+!artifacts/screenshots/51-unity-training-v070.png
+!artifacts/screenshots/52-unity-research-v070.png
+!artifacts/screenshots/53-unity-battle-v070.png
+!artifacts/screenshots/54-unity-deploy-v070.png
+!artifacts/screenshots/64-unity-training-v090.png
+!artifacts/screenshots/66-unity-battle-v090.png
+# Unused source rigs; the referenced troop rigs and their Unity metadata remain tracked.
+UnityProject/Assets/Hearthhold/Resources/ThirdParty/KayKitAdventurers/Barbarian.fbx*
+UnityProject/Assets/Hearthhold/Resources/ThirdParty/KayKitAdventurers/Rogue.fbx*
 Saves/
 **/Saves/
 *.exe

@@ -15,7 +15,7 @@ internal static class CoreTests
         Stopwatch watch = Stopwatch.StartNew();
         try
         {
-            Construction(); Economy(); Persistence(); Combat(); Determinism(); MissionsCheck(); Progression(); Training(); LimitsAndDemolition(); ModelChecks();
+            Construction(); Economy(); Persistence(); Combat(); Determinism(); MissionsCheck(); Progression(); Training(); TechnologyAndUnlocks(); Balance(); LimitsAndDemolition(); ModelChecks();
             Console.WriteLine("\n" + count + " checks passed in " + watch.Elapsed.TotalSeconds.ToString("F2") + "s."); return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -111,18 +111,18 @@ internal static class CoreTests
         SaveStore.Validate(legacy.Village);
         Check(legacy.Village.Count(BuildingKind.Mine) == 6 && !legacy.Build(BuildingKind.Mine, 27, 5), "Legacy over-cap buildings survive while new construction is blocked");
         Check(legacy.Move(legacy.Village.Buildings[legacy.Village.Buildings.Count - 1].Id, 30, 5), "Legacy over-cap buildings can still be moved");
-        for (int i = 0; i < 7; i++) Check(Rules.BuildLimit((BuildingKind)i, 3) >= Rules.BuildLimit((BuildingKind)i, 1), "Count cap is monotonic for " + (BuildingKind)i);
+        for (int i = 0; i < Rules.Buildings.Length; i++) Check(Rules.BuildLimit((BuildingKind)i, 3) >= Rules.BuildLimit((BuildingKind)i, 1), "Count cap is monotonic for " + (BuildingKind)i);
     }
     private static void ModelChecks()
     {
-        for (int kind = 0; kind < 7; kind++)
+        for (int kind = 0; kind < Rules.Buildings.Length; kind++)
         {
             ModelMesh mesh = ModelFactory.Building((BuildingKind)kind, 1);
             Check(mesh.Faces.Count > 60, "Detailed shared model exists for " + (BuildingKind)kind);
             ValidateMesh(mesh);
             ValidateMesh(ModelFactory.Building((BuildingKind)kind, 3));
         }
-        for (int kind = 0; kind < 4; kind++)
+        for (int kind = 0; kind < Rules.Troops.Length; kind++)
         {
             ValidateMesh(ModelFactory.Troop((TroopKind)kind));
             TroopSpec spec = Rules.Spec((TroopKind)kind);
@@ -146,6 +146,25 @@ internal static class CoreTests
         string message;
         VillageData read = SaveStore.Load(path, out message);
         Check(read.Buildings.Count == v.Buildings.Count && read.Gold == v.Gold, "Save roundtrip preserves settlement");
+        string oldBalancePath = Path.Combine(directory, "old-arc-tower.xml");
+        VillageData oldBalance = VillageData.Create();
+        oldBalance.Add(BuildingKind.ArcTower, 30, 30);
+        SaveStore.Save(oldBalancePath, oldBalance);
+        System.Xml.XmlDocument oldBalanceXml = new System.Xml.XmlDocument();
+        oldBalanceXml.Load(oldBalancePath);
+        System.Xml.XmlNode oldArcHealth = oldBalanceXml.SelectSingleNode("/VillageData/Buildings/Building[Kind='ArcTower']/Health");
+        if (oldArcHealth == null) throw new Exception("Old balance test fixture has no arc tower health");
+        oldArcHealth.InnerText = "760"; oldBalanceXml.Save(oldBalancePath);
+        VillageData migratedBalance = SaveStore.Load(oldBalancePath, out message);
+        Building migratedArc = migratedBalance.Buildings.Find(b => b.Kind == BuildingKind.ArcTower);
+        Check(migratedArc != null && migratedArc.Health == migratedArc.MaxHealth && migratedBalance.Buildings.Count == oldBalance.Buildings.Count,
+            "Old full-health arc tower loads without losing village buildings");
+        Check(message.Contains("风暴塔") && File.ReadAllText(oldBalancePath).Contains("<Health>760</Health>"),
+            "Balance migration informs the player and leaves the original save unchanged until saving");
+        oldArcHealth.InnerText = "759"; oldBalanceXml.Save(oldBalancePath);
+        bool malformedHealthRejected = false;
+        try { SaveStore.Load(oldBalancePath, out message); } catch (InvalidDataException) { malformedHealthRejected = true; }
+        Check(malformedHealthRejected, "Unknown arc tower health remains invalid instead of being silently repaired");
         string legacyPath = Path.Combine(directory, "legacy-v02.xml");
         string legacyXml = File.ReadAllText(path);
         foreach (string element in new[] { "CampaignStars", "CampaignBest", "ClaimedAchievements", "ArmyInitialized", "ArmyCounts", "TrainingQueue", "TrainingStartedUtcTicks" }) legacyXml = WithoutElement(legacyXml, element);
@@ -188,6 +207,7 @@ internal static class CoreTests
         Check(!b.Deploy(TroopKind.Vanguard, -100, 1000), "Reject out-of-map deployment");
         Battle scout = new Battle(0); scout.Step(); Check(scout.TickNumber == 0, "Scouting does not consume battle time");
         Check(!scout.CastHeal(1000, 1000) && scout.SpellCharges == 2, "Cannot waste a spell before battle");
+        Check(!scout.CastFocus(18000, 18000) && scout.FocusCharges == 2, "Cannot issue focus during scouting");
         Check(b.Deploy(TroopKind.Vanguard, 10500, 20500), "Deploy from outer boundary");
         Check(b.Available[0] == countBefore - 2 && b.Started, "Deployment consumes one soldier and starts timer");
         Check(!session.Build(BuildingKind.Cannon, 5, 5), "Village cannot mutate during battle");
@@ -195,6 +215,16 @@ internal static class CoreTests
         Check(b.CastHeal(u.X, u.Z) && u.Health > 1, "Healing restores nearby living soldiers");
         Check(b.CastHeal(u.X, u.Z) && u.Health <= u.Spec.Health, "Healing cannot exceed max health");
         Check(!b.CastHeal(u.X, u.Z), "Spell charges are finite");
+        Building focusTarget = null;
+        foreach (Building candidate in b.Buildings) if (candidate.Health > 0 && candidate.Kind == BuildingKind.Keep) { focusTarget = candidate; break; }
+        Check(focusTarget != null && !b.CastFocus(-1, 0) && b.FocusCharges == 2, "Invalid focus cannot consume a command");
+        Check(!b.CastFocus(500, 500) && b.FocusCharges == 2, "Focus requires a live non-wall target");
+        Check(b.CastFocus(focusTarget.CenterX, focusTarget.CenterZ) && b.FocusTargetId == focusTarget.Id && b.FocusCharges == 1, "Focus selects a live building and consumes one charge");
+        b.Step();
+        Check(b.Units[0].TargetId == focusTarget.Id, "Active troops obey a focus order");
+        Check(b.CastFocus(focusTarget.CenterX, focusTarget.CenterZ) && !b.CastFocus(focusTarget.CenterX, focusTarget.CenterZ), "Focus charges are finite");
+        for (int tick = 0; tick < 140 && !b.Finished; tick++) b.Step();
+        Check(b.FocusTargetId == -1, "Focus order expires after seven seconds");
         b.Finish(); int gold = session.Village.Gold;
         Check(session.Settle(), "Finished battle settles once");
         int reward = session.Village.Gold - gold;
@@ -220,6 +250,36 @@ internal static class CoreTests
         ranged.Deploy(TroopKind.Ranger, 10500, 20500);
         for (int i = 0; i < 20; i++) ranged.Step();
         Check(ranged.Buildings[0].Health < target.MaxHealth && ranged.Buildings[1].Health == barrier.MaxHealth, "Ranger shoots buildings across wall");
+        Building cannon = new Building { Id = 3, X = 14, Z = 19, Kind = BuildingKind.Cannon }; cannon.Health = cannon.MaxHealth;
+        Battle clustered = new Battle(new List<Building> { cannon }, 0, new[] { 2, 0, 0, 0 });
+        Check(clustered.Deploy(TroopKind.Vanguard, 10500, 19500) && clustered.Deploy(TroopKind.Vanguard, 10500, 20500), "Two troops can form a compact group");
+        clustered.Step();
+        Check(clustered.Units[0].Health == clustered.MaxHealth(TroopKind.Vanguard) || clustered.Units[1].Health == clustered.MaxHealth(TroopKind.Vanguard), "Cannon remains a ground single-target defense");
+        Building arc = new Building { Id = 5, X = 14, Z = 19, Kind = BuildingKind.ArcTower }; arc.Health = arc.MaxHealth;
+        Battle splashDefense = new Battle(new List<Building> { arc }, 0, new[] { 2, 0, 0, 0 });
+        splashDefense.Deploy(TroopKind.Vanguard, 10500, 19500); splashDefense.Deploy(TroopKind.Vanguard, 10500, 20500); splashDefense.Step();
+        Check(splashDefense.Units[0].Health < splashDefense.MaxHealth(TroopKind.Vanguard) && splashDefense.Units[1].Health < splashDefense.MaxHealth(TroopKind.Vanguard), "Arc tower splashes a compact group");
+        Building tower = new Building { Id = 4, X = 14, Z = 19, Kind = BuildingKind.Watchtower }; tower.Health = tower.MaxHealth;
+        Battle spacedDefense = new Battle(new List<Building> { tower }, 0, new[] { 2, 0, 0, 0 });
+        spacedDefense.Deploy(TroopKind.Vanguard, 10500, 19500); spacedDefense.Deploy(TroopKind.Vanguard, 10500, 20500); spacedDefense.Step();
+        Check(spacedDefense.Units[0].Health == spacedDefense.MaxHealth(TroopKind.Vanguard) || spacedDefense.Units[1].Health == spacedDefense.MaxHealth(TroopKind.Vanguard), "Watchtower remains a single-target defense");
+
+        Building walledKeep = new Building { Id = 20, X = 17, Z = 18, Kind = BuildingKind.Keep }; walledKeep.Health = walledKeep.MaxHealth;
+        Building spellWall = new Building { Id = 21, X = 12, Z = 20, Kind = BuildingKind.Wall }; spellWall.Health = spellWall.MaxHealth;
+        Battle tactics = new Battle(new List<Building> { walledKeep, spellWall }, 0, new[] { 1, 0, 0, 0, 1, 0, 0, 0 });
+        tactics.Deploy(TroopKind.Vanguard, 10500, 20500); tactics.Deploy(TroopKind.SkyRider, 10500, 19500);
+        Check(tactics.CastFury(10500, 20500) && tactics.Units[0].FuryTicks > 0, "Fury affects deployed troops and consumes its charge");
+        Building tacticalWall = tactics.Buildings[1];
+        Check(tactics.CastBreach(tacticalWall.CenterX, tacticalWall.CenterZ) && tacticalWall.Health < tacticalWall.MaxHealth, "Breach damages walls and consumes its charge");
+        int skyStart = tactics.Units[1].X; for (int i = 0; i < 20; i++) tactics.Step();
+        Check(tactics.Units[1].X > skyStart, "Flying troop advances directly without wall pathfinding");
+
+        Building frozenTower = new Building { Id = 30, X = 14, Z = 19, Kind = BuildingKind.Watchtower }; frozenTower.Health = frozenTower.MaxHealth;
+        Battle frozen = new Battle(new List<Building> { frozenTower }, 0, new[] { 1, 0, 0, 0 });
+        frozen.Deploy(TroopKind.Vanguard, 10500, 20500); int beforeFreeze = frozen.Units[0].Health;
+        Check(frozen.CastFreeze(frozenTower.CenterX, frozenTower.CenterZ), "Freeze accepts a live defense target");
+        for (int i = 0; i < 30; i++) frozen.Step();
+        Check(frozen.Units[0].Health == beforeFreeze, "Frozen defense cannot attack during the effect");
         Battle timeout = new Battle(0); timeout.Deploy(TroopKind.Vanguard, 500, 500);
         for (int i = 0; i < 3600; i++) timeout.Step();
         Check(timeout.Finished, "A started battle always terminates by deadline");
@@ -260,7 +320,7 @@ internal static class CoreTests
             { if (i == 250 || i == 550) battle.CastHeal(17000, 19000); battle.Step(); }
             Check(battle.Finished, "Mission " + m + " reaches result screen");
             Console.WriteLine("  Mission " + m + ": " + battle.Destruction + "% / " + battle.Stars + " stars / " + battle.AliveCount + " alive");
-            Check(battle.Stars > 0, "Mission " + m + " can be won with the supplied army");
+            if (m < 4) Check(battle.Stars > 0, "Opening mission " + m + " can be won with the legacy level-one army");
         }
     }
     private static void Progression()
@@ -292,13 +352,14 @@ internal static class CoreTests
     {
         DateTime start = DateTime.UtcNow;
         GameSession session = NewSession();
-        Check(session.Village.ArmyHousing == 45 && session.Village.ArmyCapacity == 45 && session.Village.ArmyCounts[2] == 3, "Fresh village receives a balanced starter formation");
+        Check(session.Village.ArmyHousing == 45 && session.Village.ArmyCapacity == 45 && session.Village.ArmyCounts[0] == 22 && session.Village.ArmyCounts[1] == 23 && session.Village.ArmyCounts[2] == 0, "Fresh village receives a full basic formation without locked troops");
         int gold = session.Village.Gold;
+        Check(!session.QueueTroop(TroopKind.Guardian, start) && session.Village.Gold == gold, "Locked troop cannot enter training queue");
         Check(!session.QueueTroop(TroopKind.Vanguard, start) && session.Village.Gold == gold, "Full formation rejects extra training without spending gold");
         Check(session.DismissTroop(TroopKind.Vanguard) && session.Village.ArmyHousing == 44, "Dismissing a trained troop frees its housing space");
         Check(session.QueueTroop(TroopKind.Vanguard, start) && session.Village.QueuedHousing == 1 && session.Village.Gold == gold - Rules.Spec(TroopKind.Vanguard).TrainCost, "Manual training spends cost and enters the queue");
-        Check(!session.AdvanceTraining(start.AddSeconds(1)) && session.Village.ArmyCounts[0] == 11, "Training does not finish before its duration");
-        Check(session.AdvanceTraining(start.AddSeconds(2)) && session.Village.ArmyCounts[0] == 12 && session.Village.TrainingQueue.Count == 0, "Training completes at its deterministic duration");
+        Check(!session.AdvanceTraining(start.AddSeconds(1)) && session.Village.ArmyCounts[0] == 21, "Training does not finish before its duration");
+        Check(session.AdvanceTraining(start.AddSeconds(2)) && session.Village.ArmyCounts[0] == 22 && session.Village.TrainingQueue.Count == 0, "Training completes at its deterministic duration");
         session.DismissTroop(TroopKind.Ranger); gold = session.Village.Gold;
         session.QueueTroop(TroopKind.Ranger, start.AddSeconds(3));
         Check(session.CancelLastTraining(start.AddSeconds(3)) && session.Village.Gold == gold && session.Village.TrainingQueue.Count == 0, "Canceling queued training refunds its full cost");
@@ -310,24 +371,26 @@ internal static class CoreTests
         Check(refund.CancelLastTraining(start) && refund.Village.Gold == refund.Village.Capacity, "Training remains cancelable for a full refund after freeing warehouse space");
 
         GameSession preset = NewSession();
+        foreach (Building b in preset.Village.Buildings) if (b.Kind == BuildingKind.TrainingCamp) { b.Level = 3; b.Health = b.MaxHealth; }
         for (int i = 0; i < preset.Village.ArmyCounts.Count; i++) preset.Village.ArmyCounts[i] = 0;
-        int presetCost = 0; for (int i = 0; i < 4; i++) presetCost += Rules.FormationCounts[1][i] * Rules.Troops[i].TrainCost;
+        int presetCost = 0; for (int i = 0; i < Rules.Troops.Length; i++) presetCost += Rules.FormationCounts[2][i] * Rules.Troops[i].TrainCost;
         gold = preset.Village.Gold;
-        Check(preset.QueueFormation(1, start) && preset.Village.QueuedHousing == 45 && preset.Village.Gold == gold - presetCost, "Heavy formation fills the queue with its exact cost and housing");
+        Check(preset.QueueFormation(2, start) && preset.Village.QueuedHousing == 45 && preset.Village.Gold == gold - presetCost, "Heavy formation fills the queue with its exact cost and housing");
         Check(preset.AdvanceTraining(start.AddMinutes(5)) && preset.Village.ArmyHousing == 45 && preset.Village.TrainingQueue.Count == 0, "Offline elapsed time completes the queued formation");
         preset.BeginBattle();
         Check(preset.Battle != null && preset.Battle.Available[0] == 7 && preset.Battle.Available[2] == 4 && preset.Battle.InitialHousing == 45, "Battle receives the selected trained composition");
         preset.Battle.Deploy(TroopKind.Vanguard, 9500, 18000); preset.Battle.Finish(); preset.Settle();
         Check(preset.Village.ArmyCounts[0] == 6 && preset.Village.ArmyCounts[2] == 4, "Only deployed troops are consumed and unused reserves return home");
         preset.ReturnHome();
-        Check(preset.QueueFormation(1, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
+        Check(preset.QueueFormation(2, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
             "A formation preset refills only the soldier lost on the previous attack");
-        Check(!preset.QueueFormation(1, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
+        Check(!preset.QueueFormation(2, DateTime.UtcNow) && preset.Village.QueuedCount(TroopKind.Vanguard) == 1,
             "Repeated preset clicks do not duplicate an already queued replacement");
         GameSession lastSappers = NewSession();
+        foreach (Building b in lastSappers.Village.Buildings) if (b.Kind == BuildingKind.TrainingCamp) { b.Level = 3; b.Health = b.MaxHealth; }
         for (int i = 0; i < lastSappers.Village.ArmyCounts.Count; i++) lastSappers.Village.ArmyCounts[i] = 0;
         lastSappers.Village.ArmyCounts[(int)TroopKind.Sapper] = 4;
-        Check(lastSappers.QueueFormation(0, DateTime.UtcNow) && lastSappers.Village.ArmyHousing + lastSappers.Village.QueuedHousing == 45,
+        Check(lastSappers.QueueFormation(1, DateTime.UtcNow) && lastSappers.Village.ArmyHousing + lastSappers.Village.QueuedHousing == 45,
             "Balanced preset refills a post-battle roster containing only four surviving sappers");
         preset.Village.TrainingQueue.Clear();
         for (int i = 0; i < preset.Village.ArmyCounts.Count; i++) preset.Village.ArmyCounts[i] = 0;
@@ -345,8 +408,8 @@ internal static class CoreTests
         GameSession capacity = NewSession(); foreach (Building b in capacity.Village.Buildings) if (b.Kind == BuildingKind.Barracks) b.Level = 2;
         Check(capacity.Village.ArmyCapacity == 60, "Upgrading the expedition camp increases army capacity");
 
-        Battle heavy = new Battle(Missions.Create(3), 3, Rules.FormationCounts[1]);
-        Battle ranged = new Battle(Missions.Create(3), 3, Rules.FormationCounts[2]);
+        Battle heavy = new Battle(Missions.Create(3), 3, Rules.FormationCounts[2]);
+        Battle ranged = new Battle(Missions.Create(3), 3, Rules.FormationCounts[3]);
         bool deployed = true;
         for (int kind = 0; kind < 4; kind++)
         {
@@ -360,13 +423,15 @@ internal static class CoreTests
         Check(heavy.StateFingerprint() != ranged.StateFingerprint(), "Different formations produce different battle states under identical deployment orders");
 
         GameSession abandoned = NewSession(); int[] originalArmy = abandoned.Village.ArmyCounts.ToArray();
-        abandoned.BeginBattle(); abandoned.Battle.Deploy(TroopKind.Vanguard, 500, 500); abandoned.Battle.Deploy(TroopKind.Guardian, 500, 500);
+        abandoned.BeginBattle(); abandoned.Battle.Deploy(TroopKind.Vanguard, 500, 500); abandoned.Battle.Deploy(TroopKind.Ranger, 500, 500);
+        abandoned.Battle.Units.Add(new Unit { Kind = TroopKind.Vanguard, IsSummon = true, Health = 80 });
         bool restored = abandoned.AbandonBattle();
         for (int i = 0; i < originalArmy.Length; i++) restored &= abandoned.Village.ArmyCounts[i] == originalArmy[i];
         Check(restored && abandoned.Battle == null && abandoned.Village.Wins == 0, "Abandoning an uncommitted battle restores the full roster without rewards");
 
         GameSession interrupted = NewSession(); int[] departureArmy = interrupted.Village.ArmyCounts.ToArray();
         interrupted.BeginBattle(); interrupted.Battle.Deploy(TroopKind.Vanguard, 500, 500);
+        interrupted.Battle.Units.Add(new Unit { Kind = TroopKind.Vanguard, IsSummon = true, Health = 80 });
         VillageData safeSnapshot = interrupted.SnapshotForSave();
         bool snapshotMatches = interrupted.Village.ArmyHousing == 0 && safeSnapshot.ArmyHousing == 45;
         for (int i = 0; i < departureArmy.Length; i++) snapshotMatches &= safeSnapshot.ArmyCounts[i] == departureArmy[i];
@@ -379,5 +444,100 @@ internal static class CoreTests
         VillageData invalid = VillageData.Create(); invalid.TrainingQueue.Add(99); bool rejected = false;
         try { SaveStore.Validate(invalid); } catch (InvalidDataException) { rejected = true; }
         Check(rejected, "Invalid training queue data is rejected on load");
+    }
+    private static void TechnologyAndUnlocks()
+    {
+        GameSession session = NewSession();
+        Check(session.Village.Count(BuildingKind.Barracks) == 1 && session.Village.Count(BuildingKind.TrainingCamp) == 1 && session.Village.Count(BuildingKind.Laboratory) == 1, "New village has separate barracks, training camp and laboratory");
+        Check(session.Village.IsTroopUnlocked(TroopKind.Vanguard) && !session.Village.IsTroopUnlocked(TroopKind.Guardian) && !session.Village.IsTroopUnlocked(TroopKind.Sapper), "Camp level one unlocks only basic troops");
+        Check(!session.ResearchTroop(TroopKind.Vanguard) && session.Village.TroopLevels[0] == 1, "Lab level one blocks level-two research");
+        Building camp = null, lab = null;
+        foreach (Building b in session.Village.Buildings) { if (b.Kind == BuildingKind.TrainingCamp) camp = b; if (b.Kind == BuildingKind.Laboratory) lab = b; }
+        Check(session.Upgrade(1) && session.Upgrade(camp.Id) && session.Village.IsTroopUnlocked(TroopKind.Guardian), "Keep and camp upgrades unlock the guardian");
+        Check(!session.Village.IsTroopUnlocked(TroopKind.Sapper), "Sapper remains locked until camp level three");
+        Check(session.Upgrade(lab.Id) && session.ResearchTroop(TroopKind.Vanguard) && session.ResearchHeal(), "Upgraded laboratory researches a troop and the spell");
+        Check(session.Village.TroopLevels[0] == 2 && session.Village.HealLevel == 2 && Rules.TroopHealth(TroopKind.Vanguard, 2) > Rules.TroopHealth(TroopKind.Vanguard, 1), "Research raises persisted combat statistics");
+        Check(!session.ResearchTroop(TroopKind.Vanguard) && !session.ResearchTroop(TroopKind.Sapper), "Lab cap and camp unlock gates both apply");
+        string researchPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "research.xml");
+        SaveStore.Save(researchPath, session.Village);
+        string researchMessage; VillageData loadedResearch = SaveStore.Load(researchPath, out researchMessage);
+        Check(loadedResearch.TroopLevels[0] == 2 && loadedResearch.HealLevel == 2 && loadedResearch.TrainingCampLevel == 2, "Research and camp unlock survive a save roundtrip");
+        session.BeginBattle();
+        Check(session.Battle != null && session.Battle.TroopLevels[0] == 2 && session.Battle.HealLevel == 2, "Battle snapshots troop and spell levels");
+        Check(session.Battle.Deploy(TroopKind.Vanguard, 500, 500) && session.Battle.Units[0].Health == Rules.TroopHealth(TroopKind.Vanguard, 2), "Researched health applies on deployment");
+        session.Battle.Units[0].Health = 1;
+        Check(session.Battle.CastHeal(500, 500) && session.Battle.Units[0].Health > 1 + Rules.TroopHealth(TroopKind.Vanguard, 2) * 2 / 3, "Researched heal restores more than base spell");
+
+        VillageData legacy = VillageData.Create();
+        legacy.Version = 1;
+        legacy.Buildings.RemoveAll(delegate(Building b) { return b.Kind == BuildingKind.TrainingCamp || b.Kind == BuildingKind.Laboratory; });
+        legacy.ArmyCounts[0] = 12; legacy.ArmyCounts[1] = 10; legacy.ArmyCounts[2] = 3; legacy.ArmyCounts[3] = 4;
+        legacy.TrainingQueue.Add((int)TroopKind.Sapper);
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "legacy-v1.xml");
+        SaveStore.Save(path, legacy);
+        string message; VillageData migrated = SaveStore.Load(path, out message);
+        Check(migrated.Version == 2 && migrated.TrainingCampLevel == 3 && migrated.LaboratoryLevel == 1, "Version-one save gains compatible camp and laboratory");
+        Check(migrated.ArmyCounts[2] == 3 && migrated.ArmyCounts[3] == 4 && migrated.QueuedCount(TroopKind.Sapper) == 1 && migrated.IsTroopUnlocked(TroopKind.Sapper), "Legacy roster and queue survive migration");
+        SaveStore.Validate(migrated);
+        string preArmyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "pre-army-v1.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(preArmyPath));
+        string preArmyXml = File.ReadAllText(path);
+        foreach (string element in new[] { "ArmyInitialized", "ArmyCounts", "TrainingQueue", "TrainingStartedUtcTicks" }) preArmyXml = WithoutElement(preArmyXml, element);
+        File.WriteAllText(preArmyPath, preArmyXml);
+        VillageData preArmy = SaveStore.Load(preArmyPath, out message);
+        Check(preArmy.Version == 2 && preArmy.ArmyHousing == 45 && preArmy.TrainingCampLevel == 3, "Pre-army legacy save gains a playable starter roster after migration");
+
+        GameSession paused = NewSession(); DateTime trainingStart = DateTime.UtcNow;
+        paused.DismissTroop(TroopKind.Vanguard); paused.QueueTroop(TroopKind.Vanguard, trainingStart);
+        int campId = -1; foreach (Building b in paused.Village.Buildings) if (b.Kind == BuildingKind.TrainingCamp) campId = b.Id;
+        Check(paused.Demolish(campId) && !paused.AdvanceTraining(trainingStart.AddMinutes(1)) && paused.Village.TrainingQueue.Count == 1, "Removing training camp pauses, rather than erases, the paid queue");
+        Check(paused.Build(BuildingKind.TrainingCamp, 5, 5) && paused.AdvanceTraining(trainingStart.AddMinutes(1)) && paused.Village.TrainingQueue.Count == 0, "Rebuilding training camp resumes the preserved queue");
+    }
+    private static void Balance()
+    {
+        int[] basic = Rules.FormationCounts[0];
+        int[] advanced = Rules.FormationCounts[4];
+        for (int mission = 0; mission < Missions.Count; mission++)
+        {
+            Battle battle = new Battle(Missions.Create(mission), mission, basic);
+            for (int kind = 0; kind < basic.Length; kind++)
+                for (int i = 0; i < basic[kind]; i++) battle.Deploy((TroopKind)kind, 10500, 15000 + i % 12 * 1000);
+            for (int i = 0; i < 3600 && !battle.Finished; i++) { if (i == 250 || i == 550) battle.CastHeal(17000, 19000); battle.Step(); }
+            Console.WriteLine("  Basic formation mission " + mission + ": " + battle.Destruction + "% / " + battle.Stars + " stars / " + battle.AliveCount + " alive");
+            if (mission == 0) Check(battle.Stars >= 1, "Starter troops can earn the first campaign star");
+            if (mission == 4) Check(battle.Stars <= 2, "Basic spam cannot automatically three-star the mid-campaign fortress");
+            if (mission == 6 || mission == 7) Check(battle.Stars <= 1, "Unresearched basic troops struggle against later defenses: " + mission);
+            if (mission >= 8) Check(battle.Stars == 0, "Late missions resist an unresearched basic formation: " + mission);
+            if (mission >= 7)
+            {
+                int expandedStars = 0;
+                if (mission >= 8)
+                {
+                    int[] largeBasic = { 37, 38, 0, 0 };
+                    Battle expanded = new Battle(Missions.Create(mission), mission, largeBasic);
+                    for (int kind = 0; kind < largeBasic.Length; kind++)
+                        for (int i = 0; i < largeBasic[kind]; i++) expanded.Deploy((TroopKind)kind, 10500, 15000 + i % 12 * 1000);
+                    for (int i = 0; i < 3600 && !expanded.Finished; i++) { if (i == 250 || i == 550) expanded.CastHeal(17000, 19000); expanded.Step(); }
+                    expandedStars = expanded.Stars;
+                    Console.WriteLine("  Expanded basic mission " + mission + ": " + expanded.Destruction + "% / " + expanded.Stars + " stars / " + expanded.AliveCount + " alive");
+                }
+                Battle veteran = new Battle(Missions.Create(mission), mission, advanced, new[] { 3, 3, 3, 3, 3, 3, 3, 3 }, 3);
+                for (int kind = 0; kind < advanced.Length; kind++)
+                    for (int i = 0; i < advanced[kind]; i++) veteran.Deploy((TroopKind)kind, 10500, 15000 + i % 12 * 1000);
+                for (int i = 0; i < 3600 && !veteran.Finished; i++)
+                {
+                    if (i == 1) veteran.CastBreach(11500, 20000);
+                    if (i == 2) veteran.CastFury(10500, 20000);
+                    if (i == 120) veteran.CastFreeze(18000, 15000);
+                    if (i == 300 || i == 500) veteran.CastFocus(20000, 20000);
+                    if (i == 250 || i == 550) veteran.CastHeal(17000, 19000);
+                    veteran.Step();
+                }
+                Console.WriteLine("  Veteran formation mission " + mission + ": " + veteran.Destruction + "% / " + veteran.Stars + " stars / " + veteran.AliveCount + " alive");
+                if (mission >= 8) Check(veteran.Stars >= 1 && veteran.Destruction > battle.Destruction, "Researched 75-housing veterans can progress past basic troops: " + mission);
+                if (mission >= 8) Check(veteran.Stars >= 2, "Specialist veteran formation can earn two stars on the final chapter: " + mission);
+                if (mission == 9) Check(veteran.Stars > expandedStars, "At equal 75 housing, researched specialist troops beat basic spam in the final mission");
+            }
+        }
     }
 }

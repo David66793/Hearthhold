@@ -28,7 +28,7 @@ if ($Package) {
     $taskGuide = Join-Path $taskRoot 'release\README.txt'
     $taskGuideCopy = Join-Path $taskOut 'README.txt'
     Copy-Item -LiteralPath $taskGuide -Destination $taskGuideCopy -Force
-    $taskZip = Join-Path $taskRoot 'artifacts\Hearthhold-0.6.2-native-win-x64.zip'
+    $taskZip = Join-Path $taskRoot 'artifacts\Hearthhold-0.9.0-native-win-x64.zip'
     Compress-Archive -LiteralPath @((Join-Path $taskOut 'Hearthhold.exe'), $taskGuideCopy) -DestinationPath $taskZip -Force
     Write-Output ('Packaged: ' + $taskZip)
     Get-FileHash -LiteralPath $taskZip -Algorithm SHA256 | Select-Object Algorithm,Hash,Path

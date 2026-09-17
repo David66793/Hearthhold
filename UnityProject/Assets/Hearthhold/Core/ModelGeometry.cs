@@ -56,14 +56,21 @@ namespace Hearthhold.Core
                 case BuildingKind.Cannon: Cannon(m, level); break;
                 case BuildingKind.Watchtower: Tower(m, level); break;
                 case BuildingKind.Wall: Wall(m, level); break;
+                case BuildingKind.TrainingCamp: TrainingCamp(m, level); break;
+                case BuildingKind.Laboratory: Laboratory(m, level); break;
+                case BuildingKind.Mortar: Mortar(m, level); break;
+                case BuildingKind.AirDefense: AirDefense(m, level); break;
+                case BuildingKind.ArcTower: ArcTower(m, level); break;
+                case BuildingKind.BeamTower: BeamTower(m, level); break;
             }
             return m;
         }
         public static ModelMesh Troop(TroopKind kind)
         {
             ModelMesh m = new ModelMesh();
-            float scale = kind == TroopKind.Guardian ? 1.42f : kind == TroopKind.Sapper ? 1.1f : 1.08f;
-            int cloth = kind == TroopKind.Ranger ? 0x48785B : kind == TroopKind.Guardian ? 0x607B93 : kind == TroopKind.Sapper ? 0xA15A3E : 0xB17D3B;
+            float scale = kind == TroopKind.Guardian ? 1.42f : kind == TroopKind.SkyRider ? 1.25f : kind == TroopKind.Sapper ? 1.1f : 1.08f;
+            int cloth = kind == TroopKind.Ranger ? 0x48785B : kind == TroopKind.Guardian ? 0x607B93 : kind == TroopKind.Sapper ? 0xA15A3E :
+                kind == TroopKind.SkyRider ? 0x416C91 : kind == TroopKind.Alchemist ? 0x704D88 : kind == TroopKind.Medic ? 0xD9D2B2 : kind == TroopKind.Summoner ? 0x493A68 : 0xB17D3B;
             BevelBox(m, -0.25f, 0.04f, -0.1f, 0.21f, 0.23f, 0.38f, 0.035f, Timber);
             BevelBox(m, 0.04f, 0.04f, -0.1f, 0.21f, 0.23f, 0.38f, 0.035f, Timber);
             Box(m, -0.23f, 0.23f, -0.08f, 0.19f, 0.27f, 0.19f, 0x59625A);
@@ -117,6 +124,36 @@ namespace Hearthhold.Core
                 Box(m, -0.28f, 0.58f, -0.43f, 0.08f, 0.46f, 0.05f, Brass);
                 Box(m, 0.2f, 0.58f, -0.43f, 0.08f, 0.46f, 0.05f, Brass);
             }
+            else if (kind == TroopKind.SkyRider)
+            {
+                Beam(m, P(-0.22f, 0.82f, -0.2f), P(-0.86f, 1.18f, -0.12f), 0.08f, LightStone);
+                Beam(m, P(0.22f, 0.82f, -0.2f), P(0.86f, 1.18f, -0.12f), 0.08f, LightStone);
+                BevelBox(m, -1.03f, 1.08f, -0.34f, 0.78f, 0.1f, 0.56f, 0.04f, Teal);
+                BevelBox(m, 0.25f, 1.08f, -0.34f, 0.78f, 0.1f, 0.56f, 0.04f, Teal);
+                Frustum(m, 0, 1.47f, 0, 0.34f, 0.12f, 0.32f, 8, Brass);
+            }
+            else if (kind == TroopKind.Alchemist)
+            {
+                Frustum(m, 0, 1.39f, 0, 0.38f, 0.08f, 0.45f, 10, 0x704D88);
+                Frustum(m, 0.52f, 0.72f, 0.28f, 0.23f, 0.18f, 0.42f, 10, Crystal);
+                Frustum(m, 0.52f, 1.12f, 0.28f, 0.12f, 0.05f, 0.16f, 8, Glow);
+                Beam(m, P(-0.46f, 0.55f, 0.18f), P(-0.61f, 1.5f, 0.22f), 0.055f, Wood);
+            }
+            else if (kind == TroopKind.Medic)
+            {
+                Frustum(m, 0, 1.4f, 0, 0.34f, 0.16f, 0.28f, 10, Plaster);
+                Box(m, -0.06f, 0.75f, 0.3f, 0.12f, 0.5f, 0.04f, Red);
+                Box(m, -0.25f, 0.94f, 0.3f, 0.5f, 0.12f, 0.04f, Red);
+                Beam(m, P(0.47f, 0.46f, 0.22f), P(0.58f, 1.55f, 0.18f), 0.05f, LightStone);
+                Frustum(m, 0.58f, 1.52f, 0.18f, 0.17f, 0.03f, 0.26f, 8, Crystal);
+            }
+            else if (kind == TroopKind.Summoner)
+            {
+                Frustum(m, 0, 1.36f, 0, 0.4f, 0.05f, 0.52f, 10, 0x493A68);
+                Beam(m, P(0.48f, 0.48f, 0.24f), P(0.65f, 1.62f, 0.16f), 0.055f, Wood);
+                Frustum(m, 0.65f, 1.6f, 0.16f, 0.18f, 0.04f, 0.32f, 8, 0x9E7AD1);
+                Frustum(m, 0.65f, 1.91f, 0.16f, 0.08f, 0, 0.2f, 8, Glow);
+            }
             else
             {
                 Frustum(m, 0, 1.4f, 0, 0.32f, 0.24f, 0.23f, 10, Metal);
@@ -130,6 +167,36 @@ namespace Hearthhold.Core
             foreach (ModelFace face in m.Faces)
                 for (int i = 0; i < face.Points.Length; i++) face.Points[i] = face.Points[i] * scale;
             return m;
+        }
+        private static void Mortar(ModelMesh m, int level)
+        {
+            Frustum(m, 1.5f, 0.34f, 1.5f, 1.05f, 0.83f, 0.5f, 12, Stone);
+            Frustum(m, 1.5f, 0.82f, 1.5f, 0.72f, 0.62f, 0.28f, 12, Metal);
+            BarrelAlong(m, P(1.5f, 0.95f, 1.5f), P(1.5f, 1.72f + level * 0.1f, 1.15f), 0.42f, Metal, 14);
+            Frustum(m, 1.5f, 1.68f + level * 0.1f, 1.17f, 0.5f, 0.38f, 0.24f, 14, 0x263A43);
+        }
+        private static void AirDefense(ModelMesh m, int level)
+        {
+            Frustum(m, 1, 0.34f, 1, 0.8f, 0.58f, 0.55f, 10, Stone);
+            for (int i = 0; i < 4; i++)
+            {
+                double a = i * Math.PI / 2; float x = 1 + (float)Math.Cos(a) * 0.28f, z = 1 + (float)Math.Sin(a) * 0.28f;
+                Beam(m, P(x, 0.8f, z), P(x, 2.15f + level * 0.12f, z), 0.09f, Metal);
+                Frustum(m, x, 2.1f + level * 0.12f, z, 0.16f, 0, 0.45f, 7, Red);
+            }
+        }
+        private static void ArcTower(ModelMesh m, int level)
+        {
+            Tower(m, level);
+            Frustum(m, 1, 2.9f + level * 0.12f, 1, 0.46f, 0.14f, 0.55f, 10, Crystal);
+            for (int i = 0; i < 3; i++) Beam(m, P(1, 2.7f, 1), P(0.45f + i * 0.55f, 3.35f, 1), 0.035f, Glow);
+        }
+        private static void BeamTower(ModelMesh m, int level)
+        {
+            Tower(m, level);
+            Frustum(m, 1, 2.72f + level * 0.12f, 1, 0.42f, 0.2f, 0.42f, 12, Brass);
+            Frustum(m, 1, 3.12f + level * 0.12f, 1, 0.22f, 0.04f, 0.75f, 10, Glow);
+            Frustum(m, 1, 3.84f + level * 0.12f, 1, 0.12f, 0, 0.3f, 10, 0xFFF1A8);
         }
         private static void Keep(ModelMesh m, int level)
         {
@@ -219,6 +286,31 @@ namespace Hearthhold.Core
             for (int i = 0; i < 3; i++) Beam(m, P(0.3f + i * 0.2f, 0.5f, 2.77f), P(0.34f + i * 0.2f, 1.18f, 2.77f), 0.025f, i == 1 ? LightStone : Metal);
             if (level >= 2) BevelBox(m, 2.11f, 0.4f, 2.56f, 0.31f, 0.56f, 0.08f, 0.04f, Teal);
             if (level >= 3) Flag(m, 0.35f, 2.05f, 0.4f, 0.7f, Brass);
+        }
+        private static void TrainingCamp(ModelMesh m, int level)
+        {
+            BevelBox(m, 0.3f, 0.34f, 0.3f, 2.4f, 0.95f, 2.35f, 0.07f, Wood);
+            GableRoof(m, 0.13f, 1.32f, 0.12f, 2.73f, 2.73f, 0.87f, Teal);
+            Arch(m, 1.07f, 0.34f, 2.68f, 0.86f, 0.83f, true);
+            for (int i = 0; i < 3; i++)
+            {
+                Beam(m, P(0.47f + i * 0.86f, 0.39f, 2.8f), P(0.47f + i * 0.86f, 1.45f, 2.8f), 0.045f, Metal);
+                BevelBox(m, 0.4f + i * 0.86f, 0.43f, 2.65f, 0.15f, 0.25f, 0.18f, 0.025f, Brass);
+            }
+            Flag(m, 2.55f, 2.1f, 0.56f, 0.62f, Teal);
+            if (level >= 2) Flag(m, 0.46f, 2.1f, 0.56f, 0.55f, Brass);
+            if (level >= 3) Frustum(m, 1.5f, 2.07f, 1.5f, 0.25f, 0, 0.48f, 8, Crystal);
+        }
+        private static void Laboratory(ModelMesh m, int level)
+        {
+            BevelBox(m, 0.38f, 0.34f, 0.38f, 2.24f, 1.45f, 2.24f, 0.09f, LightStone);
+            GableRoof(m, 0.18f, 1.83f, 0.18f, 2.64f, 2.64f, 0.91f, Teal);
+            Arch(m, 1.08f, 0.34f, 2.66f, 0.83f, 1.05f, true);
+            Window(m, 0.55f, 1.03f, 2.67f, 0.34f, 0.49f);
+            Window(m, 2.14f, 1.03f, 2.67f, 0.34f, 0.49f);
+            Frustum(m, 1.5f, 2.42f, 1.5f, 0.39f, 0.17f, 0.76f, 8, Crystal);
+            Frustum(m, 1.5f, 3.16f, 1.5f, 0.18f, 0, 0.42f, 8, Glow);
+            for (int i = 0; i < 3; i++) Frustum(m, 0.61f + i * 0.88f, 0.37f, 0.61f, 0.13f, 0.05f, 0.55f + level * 0.13f, 6, Crystal);
         }
         private static void Cannon(ModelMesh m, int level)
         {
