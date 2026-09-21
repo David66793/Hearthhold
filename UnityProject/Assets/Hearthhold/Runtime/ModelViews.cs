@@ -27,6 +27,7 @@ namespace Hearthhold.UnityClient
             if (root == null) root = Create(key, ModelFactory.Building(building.Kind, building.Level), parent);
             else ApplyExternalTexture(root, "ThirdParty/KayKitMedieval/KayKitMedieval_Texture");
             AddBuildingLevelArt(root, building.Kind, building.Level);
+            if (building.Kind == BuildingKind.Wall) AlignWallToCell(root);
             if (building.Kind == BuildingKind.ArcTower) AddStormMechanism(root);
             root.name = building.Spec.Name + " #" + building.Id;
             root.transform.position = new Vector3(building.X, 0, building.Z);
@@ -41,15 +42,24 @@ namespace Hearthhold.UnityClient
         }
         public GameObject Troop(Unit unit, Transform parent, int level = 1)
         {
-            GameObject root = CreateExternal("troop:" + unit.Kind, TroopArt(unit.Kind), 1.38f, Vector3.zero, parent);
-            bool authoredTroop = root != null && UsesAuthoredRig(unit.Kind);
+            GameObject root = unit.IsPet ? Create("pet:" + unit.PetKind, ModelFactory.Pet(unit.PetKind), parent)
+                : CreateExternal("troop:" + unit.Kind, TroopArt(unit.Kind), 1.38f, Vector3.zero, parent);
+            bool authoredTroop = !unit.IsPet && root != null && UsesAuthoredRig(unit.Kind);
             if (root == null) root = Create("troop:" + unit.Kind, ModelFactory.Troop(unit.Kind), parent);
             else if (authoredTroop) ApplyRpgTextures(root, unit.Kind);
-            else ApplyExternalTexture(root, TroopTexture(unit.Kind));
+            else if (!unit.IsPet) ApplyExternalTexture(root, TroopTexture(unit.Kind));
             Bounds actorBounds = LocalBounds(root.transform);
-            if (!authoredTroop) AddTroopRoleArt(root, unit.Kind);
-            if (authoredTroop) AddAuthoredTroopLevelArt(root, unit.Kind, level, actorBounds);
-            else AddTroopLevelArt(root, unit.Kind, level, actorBounds);
+            if (!unit.IsPet && !authoredTroop) AddTroopRoleArt(root, unit.Kind);
+            if (!unit.IsPet && authoredTroop) AddAuthoredTroopLevelArt(root, unit.Kind, level, actorBounds);
+            else if (!unit.IsPet) AddTroopLevelArt(root, unit.Kind, level, actorBounds);
+            if (unit.IsHero)
+            {
+                root.transform.localScale *= 1.32f;
+                Ornament(root, "Hero mantle", PrimitiveType.Cube, new Vector3(0, actorBounds.min.y + actorBounds.size.y * 0.58f, -0.18f), new Vector3(0.86f, 0.68f, 0.12f), 0x8F352F);
+                Ornament(root, "Hero crest", PrimitiveType.Sphere, new Vector3(0, actorBounds.max.y + 0.13f, 0), new Vector3(0.28f, 0.18f, 0.28f), 0xFFD06A);
+                Ornament(root, "Hero core", PrimitiveType.Sphere, new Vector3(0, actorBounds.min.y + actorBounds.size.y * 0.62f, actorBounds.max.z + 0.05f), Vector3.one * 0.17f, 0xFF8B3D);
+            }
+            if (unit.IsPet && level >= 2) Ornament(root, "Pet level crest", PrimitiveType.Sphere, new Vector3(0, actorBounds.max.y + 0.08f, 0), Vector3.one * (0.08f + level * 0.02f), 0xFFD06A);
             root.name = unit.Spec.Name;
             AddContactShadow(root, 0.7f, 0.48f, new Vector3(0, 0.018f, 0));
             root.AddComponent<ModelActionAnimator>().Visual = root.transform.Find("3D model");
@@ -66,6 +76,7 @@ namespace Hearthhold.UnityClient
             if (root == null) root = Create("building:" + kind + ":" + level, ModelFactory.Building(kind, level), parent);
             else ApplyExternalTexture(root, "ThirdParty/KayKitMedieval/KayKitMedieval_Texture");
             AddBuildingLevelArt(root, kind, level);
+            if (kind == BuildingKind.Wall) AlignWallToCell(root);
             if (kind == BuildingKind.ArcTower) AddStormMechanism(root);
             if (kind == BuildingKind.ArcTower)
             {
@@ -80,18 +91,38 @@ namespace Hearthhold.UnityClient
             Unit unit = new Unit { Kind = kind };
             return Troop(unit, parent, level);
         }
+        public GameObject HeroPreview(HeroKind kind, int level, Transform parent)
+        {
+            Unit unit = new Unit { IsHero = true, HeroKind = kind, HeroLevel = level, Kind = TroopKind.Guardian };
+            return Troop(unit, parent, level);
+        }
+        public GameObject PetPreview(PetKind kind, int level, Transform parent)
+        {
+            Unit unit = new Unit { IsPet = true, PetKind = kind, PetLevel = level, Kind = TroopKind.Sapper };
+            return Troop(unit, parent, level);
+        }
         // Align the long side of a straight wall with its neighbours, independent of the imported FBX axis.
         public void OrientWall(GameObject root, bool alongX)
         {
             Transform visual = root != null ? root.transform.Find("3D model") : null;
             if (visual == null) return;
-            Bounds before = LocalBounds(root.transform);
+            Bounds before = BoundsRelativeTo(root.transform, visual);
             bool modelAlongX = before.size.x >= before.size.z;
             visual.localRotation = Quaternion.Euler(0, modelAlongX == alongX ? 0 : 90, 0);
-            Bounds after = LocalBounds(root.transform);
-            visual.localPosition += new Vector3(before.center.x - after.center.x, 0, before.center.z - after.center.z);
+            // Recenter the actual 3D model on the logical 1x1 cell after rotation. The old
+            // calculation included the stationary contact-shadow renderer, which diluted the
+            // correction and left opposite wall axes with different visual offsets.
+            Bounds after = BoundsRelativeTo(root.transform, visual);
+            visual.localPosition += new Vector3(0.5f - after.center.x, 0, 0.5f - after.center.z);
             BoxCollider collider = root.GetComponent<BoxCollider>();
-            if (collider != null) { Bounds fitted = LocalBounds(root.transform); collider.center = fitted.center; collider.size = fitted.size; }
+            if (collider != null) { Bounds fitted = BoundsRelativeTo(root.transform, visual); collider.center = fitted.center; collider.size = fitted.size; }
+        }
+        private static void AlignWallToCell(GameObject root)
+        {
+            Transform visual = root != null ? root.transform.Find("3D model") : null;
+            if (visual == null) return;
+            Bounds bounds = LocalBounds(root.transform);
+            visual.localPosition += new Vector3(0.5f - bounds.center.x, -bounds.min.y, 0.5f - bounds.center.z);
         }
         private Material LevelMaterial(int color)
         {
@@ -518,7 +549,11 @@ namespace Hearthhold.UnityClient
         }
         private static Bounds LocalBounds(Transform root)
         {
-            Renderer[] renderers = root.GetComponentsInChildren<Renderer>();
+            return BoundsRelativeTo(root, root);
+        }
+        private static Bounds BoundsRelativeTo(Transform root, Transform subtree)
+        {
+            Renderer[] renderers = subtree.GetComponentsInChildren<Renderer>();
             if (renderers.Length == 0) return new Bounds(Vector3.zero, Vector3.one);
             bool initialized = false; Bounds result = new Bounds();
             foreach (Renderer renderer in renderers)

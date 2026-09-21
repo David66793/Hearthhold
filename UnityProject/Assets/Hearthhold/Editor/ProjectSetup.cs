@@ -64,9 +64,15 @@ namespace Hearthhold.Editor
                 if (shader == null) throw new BuildFailedException("Hearthhold/ChromaKeySprite shader failed to import.");
                 AssetDatabase.CreateAsset(new Material(shader), "Assets/Hearthhold/Resources/GeneratedSpritePalette.mat");
             }
+            if (AssetDatabase.LoadAssetAtPath<Material>("Assets/Hearthhold/Resources/OverlayPalette.mat") == null)
+            {
+                Shader shader = Shader.Find("Hearthhold/OverlayUnlit");
+                if (shader == null) throw new BuildFailedException("Hearthhold/OverlayUnlit shader failed to import.");
+                AssetDatabase.CreateAsset(new Material(shader), "Assets/Hearthhold/Resources/OverlayPalette.mat");
+            }
             PlayerSettings.companyName = "Hearthhold Studio";
             PlayerSettings.productName = "Hearthhold";
-            PlayerSettings.bundleVersion = "0.9.0-preview";
+            PlayerSettings.bundleVersion = "0.12.1-preview";
             PlayerSettings.defaultScreenWidth = 1440;
             PlayerSettings.defaultScreenHeight = 900;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;

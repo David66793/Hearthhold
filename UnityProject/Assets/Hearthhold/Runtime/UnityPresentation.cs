@@ -10,6 +10,10 @@ namespace Hearthhold.UnityClient
         private static readonly Color Ember = new Color32(255, 139, 67, 255);
         private readonly HashSet<CombatEffect> presentedEffects = new HashSet<CombatEffect>();
         private GameObject selectionMarker, deploymentMarker, focusMarker, placementPreview;
+        private readonly List<GameObject> wallSelectionMarkers = new List<GameObject>();
+        private readonly List<GameObject> wallPlacementMarkers = new List<GameObject>();
+        private Mesh tileOutlineMesh;
+        private Material tileMintMaterial, tileDangerMaterial;
         private BuildingKind? placementPreviewKind;
         private int placementPreviewLevel;
         private Transform effectsRoot, deploymentRoot;
@@ -19,6 +23,7 @@ namespace Hearthhold.UnityClient
         private void InitializePresentation()
         {
             ringMesh = MakeRingMesh();
+            tileOutlineMesh = MakeTileOutlineMesh();
             selectionMarker = Ring("Selected building", Gold, transform);
             selectionMarker.SetActive(false);
             deploymentMarker = Ring("Nearest deployment point", Mint, transform);
@@ -59,6 +64,37 @@ namespace Hearthhold.UnityClient
             mesh.RecalculateBounds();
             return mesh;
         }
+        private Mesh MakeTileOutlineMesh()
+        {
+            const float outer = 0.5f, inner = 0.425f;
+            Vector3[] vertices = {
+                new Vector3(-outer, 0, -outer), new Vector3(outer, 0, -outer), new Vector3(outer, 0, outer), new Vector3(-outer, 0, outer),
+                new Vector3(-inner, 0, -inner), new Vector3(inner, 0, -inner), new Vector3(inner, 0, inner), new Vector3(-inner, 0, inner)
+            };
+            int[] triangles = { 0,4,1, 1,4,5, 1,5,2, 2,5,6, 2,6,3, 3,6,7, 3,7,0, 0,7,4 };
+            Mesh mesh = new Mesh { name = "Hearthhold tile outline" };
+            mesh.vertices = vertices; mesh.triangles = triangles; mesh.RecalculateNormals(); mesh.RecalculateBounds();
+            return mesh;
+        }
+        private Material TileMarkerMaterial(Color color)
+        {
+            bool danger = color == Danger;
+            Material cached = danger ? tileDangerMaterial : tileMintMaterial;
+            if (cached != null) return cached;
+            Material template = Resources.Load<Material>("OverlayPalette");
+            cached = template != null ? new Material(template) : new Material(MaterialFor(color));
+            cached.color = color;
+            if (cached.HasProperty("_BaseColor")) cached.SetColor("_BaseColor", color);
+            if (danger) tileDangerMaterial = cached; else tileMintMaterial = cached;
+            return cached;
+        }
+        private GameObject TileMarker(string markerName, Color color)
+        {
+            GameObject result = new GameObject(markerName); result.transform.SetParent(transform, false);
+            result.AddComponent<MeshFilter>().sharedMesh = tileOutlineMesh;
+            result.AddComponent<MeshRenderer>().sharedMaterial = TileMarkerMaterial(color);
+            return result;
+        }
 
         private GameObject Ring(string name, Color color, Transform parent)
         {
@@ -72,9 +108,24 @@ namespace Hearthhold.UnityClient
         private void UpdateSelectionPresentation()
         {
             Building building = session.Battle == null && selected >= 0 && moving < 0 ? session.Find(selected) : null;
-            selectionMarker.SetActive(building != null);
+            bool wall = building != null && building.Kind == BuildingKind.Wall;
+            selectionMarker.SetActive(building != null && !wall);
+            int wallMarkers = wall ? Mathf.Max(1, selectedWallIds.Count) : 0;
+            while (wallSelectionMarkers.Count < wallMarkers) wallSelectionMarkers.Add(TileMarker("Selected wall cell", Mint));
+            for (int i = 0; i < wallSelectionMarkers.Count; i++) wallSelectionMarkers[i].SetActive(i < wallMarkers);
             if (building == null) return;
             float pulse = 1 + Mathf.Sin(Time.unscaledTime * 4) * 0.025f;
+            if (wall)
+            {
+                for (int i = 0; i < wallMarkers; i++)
+                {
+                    Building segment = session.Find(selectedWallIds.Count > i ? selectedWallIds[i] : building.Id);
+                    if (segment == null) continue;
+                    wallSelectionMarkers[i].transform.position = new Vector3(segment.X + 0.5f, 0.085f, segment.Z + 0.5f);
+                    wallSelectionMarkers[i].transform.localScale = Vector3.one * pulse;
+                }
+                return;
+            }
             float diameter = (building.Spec.Size + 0.9f) * pulse;
             selectionMarker.transform.position = new Vector3(building.X + building.Spec.Size / 2f, 0.08f, building.Z + building.Spec.Size / 2f);
             selectionMarker.transform.localScale = new Vector3(diameter, 1, diameter);
@@ -121,10 +172,31 @@ namespace Hearthhold.UnityClient
             ModelViews.Tint(placementPreview, valid ? new Color(0.72f, 1, 0.82f) : new Color(1, 0.3f, 0.27f));
         }
 
+        private void ShowWallRowPlacement(int targetX, int targetZ, bool valid)
+        {
+            if (placementPreview != null) placementPreview.SetActive(false);
+            Building anchor = session.Find(moving);
+            if (anchor == null) return;
+            while (wallPlacementMarkers.Count < selectedWallIds.Count)
+                wallPlacementMarkers.Add(TileMarker("Wall row placement cell", valid ? Mint : Danger));
+            int dx = targetX - anchor.X, dz = targetZ - anchor.Z;
+            for (int i = 0; i < wallPlacementMarkers.Count; i++)
+            {
+                bool active = i < selectedWallIds.Count; GameObject marker = wallPlacementMarkers[i]; marker.SetActive(active);
+                if (!active) continue;
+                Building wall = session.Find(selectedWallIds[i]);
+                if (wall == null) { marker.SetActive(false); continue; }
+                marker.GetComponent<MeshRenderer>().sharedMaterial = TileMarkerMaterial(valid ? Mint : Danger);
+                marker.transform.position = new Vector3(wall.X + dx + 0.5f, 0.09f, wall.Z + dz + 0.5f);
+                marker.transform.localScale = Vector3.one;
+            }
+        }
+
         private void HidePlacementPresentation()
         {
             placement.SetActive(false);
             if (placementPreview != null) placementPreview.SetActive(false);
+            foreach (GameObject marker in wallPlacementMarkers) if (marker != null) marker.SetActive(false);
         }
 
         private void ResetBattlePresentation()
@@ -134,6 +206,8 @@ namespace Hearthhold.UnityClient
             if (effectsRoot != null) for (int i = effectsRoot.childCount - 1; i >= 0; i--) Destroy(effectsRoot.GetChild(i).gameObject);
             if (deploymentRoot != null) deploymentRoot.gameObject.SetActive(session.Battle != null);
             if (selectionMarker != null) selectionMarker.SetActive(false);
+            foreach (GameObject marker in wallSelectionMarkers) if (marker != null) marker.SetActive(false);
+            foreach (GameObject marker in wallPlacementMarkers) if (marker != null) marker.SetActive(false);
             if (deploymentMarker != null) deploymentMarker.SetActive(false);
             if (focusMarker != null) focusMarker.SetActive(false);
             HidePlacementPresentation();
@@ -354,6 +428,14 @@ namespace Hearthhold.UnityClient
         {
             // The battle presentation fixture intentionally instantiates all eight troop roles and four spells.
             foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.TrainingCamp) { building.Level = 3; building.Health = building.MaxHealth; }
+            foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.Keep) { building.Level = 4; building.Health = building.MaxHealth; }
+            if (session.Village.Count(BuildingKind.HeroHall) == 0) session.Village.Add(BuildingKind.HeroHall, 5, 5);
+            if (session.Village.Count(BuildingKind.PetLodge) == 0) session.Village.Add(BuildingKind.PetLodge, 9, 5);
+            session.Village.EnsureHeroes(); session.Village.HeroLevels[(int)HeroKind.EmberWarden] = 2; session.Village.PetLevels[(int)PetKind.CinderFox] = 2;
+            session.Village.HeroPetAssignments[(int)HeroKind.EmberWarden] = (int)PetKind.CinderFox;
+            session.Village.EnsureTechnology();
+            for (int i = 0; i < session.Village.SpellLevels.Count; i++) session.Village.SpellLevels[i] = 3;
+            session.Village.HealLevel = 3;
             for (int i = 0; i < Rules.FormationCounts[4].Length; i++) session.Village.ArmyCounts[i] = Rules.FormationCounts[4][i];
             for (int i = 0; i < Missions.Count - 1; i++) session.Village.RecordMission(i, 1, 55 + i * 3);
             session.MissionIndex = Missions.Count - 1;
@@ -371,6 +453,10 @@ namespace Hearthhold.UnityClient
             }
             Debug.Log("HEARTHHOLD_DEPLOY_SMOKE_READY: central battlefield click snapped to a legal deployment cell.");
             for (int i = 0; i < Rules.Troops.Length; i++) session.Battle.Deploy((TroopKind)i, 9500, 15000 + i * 2100);
+            bool heroReady = session.Battle.DeployHeroNearest(HeroKind.EmberWarden, 9500, 30000) && session.Battle.CastHeroSkill(HeroKind.EmberWarden);
+            Unit petSmoke = null; foreach (Unit unit in session.Battle.Units) if (unit.IsPet) petSmoke = unit;
+            if (!heroReady || petSmoke == null || petSmoke.BondedHeroUnitId < 0) { Debug.LogError("HEARTHHOLD_HERO_SMOKE_FAILED: hero, bound pet or active skill failed."); Application.Quit(4); return; }
+            Debug.Log("HEARTHHOLD_HERO_SMOKE_READY: Ember Warden deployed with a bound independent pet and cast its skill.");
             session.Battle.Deploy(TroopKind.Guardian, 9500, 19000);
             session.Battle.Deploy(TroopKind.Ranger, 8500, 20500);
             bool breachReady = session.Battle.CastBreach(11500, 20000);
@@ -425,6 +511,49 @@ namespace Hearthhold.UnityClient
             selected = -1; showCampaign = true;
             session.Notice = "0.6.3 战役进度验收：逐关解锁、最佳纪录与成就奖励。";
         }
+        private void PrepareBuildCatalogSmoke()
+        {
+            PrepareHomeSmoke(); showBuildCatalog = true;
+            session.Notice = "建造目录验收：价格、用途、解锁和数量上限集中展示。";
+        }
+        private void PrepareWallRowSmoke()
+        {
+            selectedWallIds.Clear();
+            foreach (Building building in session.Village.Buildings)
+            {
+                if (building.Kind != BuildingKind.Wall || session.WallRow(building.Id).Count < 3) continue;
+                selected = building.Id; ToggleWallRowSelection(building); break;
+            }
+            if (selectedWallIds.Count < 3)
+            {
+                Debug.LogError("HEARTHHOLD_WALL_ROW_SMOKE_FAILED: no continuous wall row was selected.");
+                Application.Quit(4); return;
+            }
+            Debug.Log("HEARTHHOLD_WALL_ROW_SMOKE_READY: selected=" + selectedWallIds.Count);
+            session.Notice = "城墙坐标验收：每段墙体与青色 1×1 格点框共用同一中心。";
+        }
+        private void PrepareWallAxesSmoke()
+        {
+            for (int z = 15; z <= 20; z++) session.Village.Add(BuildingKind.Wall, 25, z);
+            RebuildBuildings(); selectedWallIds.Clear();
+            foreach (Building building in session.Village.Buildings)
+                if (building.Kind == BuildingKind.Wall) { selectedWallIds.Add(building.Id); if (selected < 0) selected = building.Id; }
+            focus = new Vector3(21.5f, 0, 20); worldCamera.orthographicSize = 9.5f; MoveCamera();
+            session.Notice = "城墙双轴验收：横向与纵向模型均与各自青色格框同心。";
+            Debug.Log("HEARTHHOLD_WALL_AXES_SMOKE_READY: selected=" + selectedWallIds.Count);
+        }
+        private void PrepareHeroesSmoke(bool showPet)
+        {
+            Building keep = session.Find(1); keep.Level = 4; keep.Health = keep.MaxHealth;
+            Building hall = session.Village.Add(BuildingKind.HeroHall, 5, 5);
+            Building lodge = session.Village.Add(BuildingKind.PetLodge, 31, 5);
+            hall.Level = lodge.Level = 2; hall.Health = hall.MaxHealth; lodge.Health = lodge.MaxHealth;
+            session.Village.EnsureHeroes(); session.Village.HeroLevels[0] = 1; session.Village.PetLevels[0] = 1;
+            session.Village.HeroPetAssignments[0] = 0; session.Village.Gold = session.Village.Capacity; session.Village.Crystal = session.Village.Capacity;
+            RebuildBuildings(); rosterSelection = showPet ? 1 : 0; showHeroes = true;
+            session.Notice = "英雄殿堂验收：动态名册、实时动作、数值详情、灵契与升级入口。";
+            Debug.Log("HEARTHHOLD_HERO_HALL_SMOKE_READY: hall=2 lodge=2 selected=" + (showPet ? "pet" : "hero"));
+        }
 
         private void PrepareTrainingSmoke()
         {
@@ -439,12 +568,21 @@ namespace Hearthhold.UnityClient
         {
             Building lab = null;
             foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.Laboratory) { lab = building; break; }
+            session.Village.Gold = session.Village.Capacity; session.Village.Crystal = session.Village.Capacity;
             session.Upgrade(1);
             if (lab != null) session.Upgrade(lab.Id);
             session.ResearchTroop(TroopKind.Vanguard);
             session.ResearchHeal();
+            session.ResearchSpell(SpellKind.Fury);
+            session.ResearchSpell(SpellKind.Freeze);
             selected = lab == null ? -1 : lab.Id; showResearch = true;
             session.Notice = "0.9 科技验收：八兵种与四类法术共享规则数据。";
+        }
+
+        private void PrepareProgressionSmoke()
+        {
+            selected = -1; showProgression = true;
+            session.Notice = "发展路线验收：议事堡1—3级实装内容与4—8级规划。";
         }
 
         private void PrepareHomeSmoke()
@@ -457,6 +595,9 @@ namespace Hearthhold.UnityClient
         private void DisposePresentation()
         {
             if (ringMesh != null) Destroy(ringMesh);
+            if (tileOutlineMesh != null) Destroy(tileOutlineMesh);
+            if (tileMintMaterial != null) Destroy(tileMintMaterial);
+            if (tileDangerMaterial != null) Destroy(tileDangerMaterial);
         }
     }
 

@@ -4,8 +4,11 @@ using System.Xml.Serialization;
 
 namespace Hearthhold.Core
 {
-    public enum BuildingKind { Keep, Mine, Reservoir, Barracks, Cannon, Watchtower, Wall, TrainingCamp, Laboratory, Mortar, AirDefense, ArcTower, BeamTower }
+    public enum BuildingKind { Keep, Mine, Reservoir, Barracks, Cannon, Watchtower, Wall, TrainingCamp, Laboratory, Mortar, AirDefense, ArcTower, BeamTower, HeroHall, PetLodge }
     public enum TroopKind { Vanguard, Ranger, Guardian, Sapper, SkyRider, Alchemist, Medic, Summoner }
+    public enum SpellKind { Heal, Fury, Freeze, Breach }
+    public enum HeroKind { EmberWarden }
+    public enum PetKind { CinderFox, Mossback }
 
     public sealed class BuildingSpec
     {
@@ -26,6 +29,22 @@ namespace Hearthhold.Core
             bool flying = false, bool preferDefenses = false, bool preferWalls = false, int splashRadius = 0, int healPower = 0, int summonCooldown = 0)
         { Name = name; Role = role; Health = health; Damage = damage; Range = range; Speed = speed; Cooldown = cooldown; Count = count; Housing = housing; TrainCost = trainCost; TrainSeconds = trainSeconds; Flying = flying; PreferDefenses = preferDefenses; PreferWalls = preferWalls; SplashRadius = splashRadius; HealPower = healPower; SummonCooldown = summonCooldown; }
         public string Description, Tactics, Weakness;
+    }
+
+    public sealed class HeroSpec
+    {
+        public string Name, Role, Description, AbilityName, AbilityDescription;
+        public TroopSpec Combat;
+        public HeroSpec(string name, string role, string description, string abilityName, string abilityDescription, TroopSpec combat)
+        { Name = name; Role = role; Description = description; AbilityName = abilityName; AbilityDescription = abilityDescription; Combat = combat; }
+    }
+    public sealed class PetSpec
+    {
+        public string Name, Role, Description;
+        public TroopSpec Combat;
+        public int FollowRange;
+        public PetSpec(string name, string role, string description, TroopSpec combat, int followRange)
+        { Name = name; Role = role; Description = description; Combat = combat; FollowRange = followRange; }
     }
 
     public sealed class AchievementSpec
@@ -71,22 +90,32 @@ namespace Hearthhold.Core
             new BuildingSpec("重弩炮", "地面单体重击；克制高血量前排，但无法攻击空军。", 2, 850, 220, 44, 6500, 24),
             new BuildingSpec("哨塔", "地空通用远射；火力稳定但缺少群体伤害。", 2, 650, 200, 19, 8000, 15, true, true),
             new BuildingSpec("石墙", "阻挡地面部队，迫使对手绕行或破墙。", 1, 430, 20, 0, 0, 0),
-            new BuildingSpec("训练营", "负责训练队列与兵种解锁：1级先锋/游侠，2级铁卫，3级破城手。", 3, 700, 300, 0, 0, 0),
+            new BuildingSpec("训练营", "负责即时造兵与兵种解锁：1级先锋/游侠，2级铁卫，3级破城手。", 3, 700, 300, 0, 0, 0),
             new BuildingSpec("实验室", "研究兵种与四类战术法术；科技等级不超过实验室等级。", 3, 700, 320, 0, 0, 0),
             new BuildingSpec("投石台", "超远地面范围攻击，有3格近距盲区。", 3, 780, 360, 70, 10500, 42, true, false, 3000, 2100),
             new BuildingSpec("猎空弩", "只攻击空中目标，单次伤害很高。", 2, 720, 340, 105, 8500, 25, false, true),
             new BuildingSpec("风暴塔", "中程地空范围电弧，惩罚密集军团。", 2, 900, 380, 42, 6500, 18, true, true, 0, 2200),
-            new BuildingSpec("灼光塔", "持续锁定同一目标时伤害逐步升高。", 2, 900, 440, 68, 7000, 8, true, true, 0, 0, true)
+            new BuildingSpec("灼光塔", "持续锁定同一目标时伤害逐步升高。", 2, 900, 440, 68, 7000, 8, true, true, 0, 0, true),
+            new BuildingSpec("英雄殿堂", "解锁、升级并管理英雄。英雄不占兵营营位，也不由实验室研究。", 3, 1500, 1000, 0, 0, 0),
+            new BuildingSpec("战宠小屋", "解锁、升级并配置英雄战宠。战宠随英雄部署，英雄阵亡后继续独立作战。", 3, 1050, 850, 0, 0, 0)
         };
         public static readonly TroopSpec[] Troops = {
-            new TroopSpec("先锋", "近战 · 均衡", 250, 38, 1050, 150, 15, 12, 1, 15, 2),
-            new TroopSpec("游侠", "远程 · 跨墙射击", 120, 29, 4500, 125, 17, 10, 1, 20, 2),
-            new TroopSpec("铁卫", "重甲 · 优先防御", 2800, 110, 1100, 85, 24, 3, 5, 85, 8, false, true),
-            new TroopSpec("破城手", "攻城 · 城墙特攻", 210, 43, 1100, 165, 18, 4, 2, 35, 3, false, false, true),
-            new TroopSpec("翼骑", "空军 · 优先防御", 780, 100, 1250, 145, 24, 4, 4, 90, 7, true, true),
-            new TroopSpec("炼金师", "远程 · 范围轰击", 380, 75, 5200, 105, 28, 4, 3, 70, 6, false, false, false, 1700),
-            new TroopSpec("医师", "支援 · 治疗友军", 560, 0, 3800, 115, 20, 3, 4, 80, 7, false, false, false, 0, 100),
-            new TroopSpec("唤灵师", "召唤 · 数量压力", 470, 45, 4300, 100, 24, 3, 4, 95, 8, false, false, false, 0, 0, 90)
+            new TroopSpec("先锋", "近战 · 均衡", 250, 38, 1050, 150, 15, 12, 1, 15, 0),
+            new TroopSpec("游侠", "远程 · 跨墙射击", 120, 29, 4500, 125, 17, 10, 1, 20, 0),
+            new TroopSpec("铁卫", "重甲 · 优先防御", 2800, 110, 1100, 85, 24, 3, 5, 85, 0, false, true),
+            new TroopSpec("破城手", "攻城 · 城墙特攻", 210, 43, 1100, 165, 18, 4, 2, 35, 0, false, false, true),
+            new TroopSpec("翼骑", "空军 · 优先防御", 780, 100, 1250, 145, 24, 4, 4, 90, 0, true, true),
+            new TroopSpec("炼金师", "远程 · 范围轰击", 380, 75, 5200, 105, 28, 4, 3, 70, 0, false, false, false, 1700),
+            new TroopSpec("医师", "支援 · 治疗友军", 560, 0, 3800, 115, 20, 3, 4, 80, 0, false, false, false, 0, 100),
+            new TroopSpec("唤灵师", "召唤 · 数量压力", 470, 45, 4300, 100, 24, 3, 4, 95, 0, false, false, false, 0, 0, 90)
+        };
+        public static readonly HeroSpec[] Heroes = {
+            new HeroSpec("烬卫", "英雄 · 重装突进", "披覆炉心重甲的聚落守护者。每场可投放一次，不占营位，死亡不会永久损失。", "炉心号令", "恢复30%最大生命，并令自己与5格内友军强化8秒。",
+                new TroopSpec("烬卫", "英雄 · 重装突进", 5200, 260, 1400, 115, 18, 1, 0, 0, 0, false, true))
+        };
+        public static readonly PetSpec[] Pets = {
+            new PetSpec("燧爪", "战宠 · 近战协攻", "忠诚的炉火猎兽。跟随英雄攻击同一目标；英雄倒下后会继续独立作战。", new TroopSpec("燧爪", "战宠 · 近战协攻", 950, 85, 1100, 175, 15, 1, 0, 0, 0), 3200),
+            new PetSpec("苔背", "战宠 · 守护", "尚未开放的防护型战宠。", new TroopSpec("苔背", "战宠 · 守护", 1500, 45, 1100, 110, 20, 1, 0, 0, 0), 2800)
         };
         public static readonly string[] FormationNames = { "新兵集结", "均衡远征", "重甲破阵", "远程压制", "王庭突击·75" };
         public static readonly int[][] FormationCounts = {
@@ -98,6 +127,16 @@ namespace Hearthhold.Core
         };
         public static BuildingSpec Spec(BuildingKind kind) { return Buildings[(int)kind]; }
         public static TroopSpec Spec(TroopKind kind) { return Troops[(int)kind]; }
+        public static HeroSpec Spec(HeroKind kind) { return Heroes[(int)kind]; }
+        public static PetSpec Spec(PetKind kind) { return Pets[(int)kind]; }
+        public static int HeroHealth(HeroKind kind, int level) { return Spec(kind).Combat.Health * (100 + Math.Max(0, level - 1) * 15) / 100; }
+        public static int HeroDamage(HeroKind kind, int level) { return Spec(kind).Combat.Damage * (100 + Math.Max(0, level - 1) * 15) / 100; }
+        public static int HeroUpgradeGold(int level) { return 500 * level; }
+        public static int HeroUpgradeCrystal(int level) { return 350 * level; }
+        public static int PetHealth(PetKind kind, int level) { return Spec(kind).Combat.Health * (100 + Math.Max(0, level - 1) * 12) / 100; }
+        public static int PetDamage(PetKind kind, int level) { return Spec(kind).Combat.Damage * (100 + Math.Max(0, level - 1) * 12) / 100; }
+        public static int PetUpgradeCrystal(int level) { return 280 * level; }
+        public static int MaxBuildingLevel(BuildingKind kind) { return kind == BuildingKind.Keep || kind == BuildingKind.HeroHall || kind == BuildingKind.PetLodge ? 4 : 3; }
         public static int UnlockCampLevel(TroopKind kind)
         {
             if (kind == TroopKind.Guardian || kind == TroopKind.SkyRider) return 2;
@@ -108,6 +147,17 @@ namespace Hearthhold.Core
         public static int TroopDamage(TroopKind kind, int level) { return Spec(kind).Damage * (10 + Math.Max(0, level - 1)) / 10; }
         public static int ResearchGold(int level) { return 180 * level; }
         public static int ResearchCrystal(int level) { return 120 * level; }
+        public static readonly string[] SpellNames = { "疗愈之雨", "战吼", "霜封", "裂地" };
+        public static int SpellUnlockKeepLevel(SpellKind kind)
+        { return kind == SpellKind.Heal ? 1 : kind == SpellKind.Breach ? 3 : 2; }
+        public static string SpellEffect(SpellKind kind, int level)
+        {
+            if (level <= 0) return "尚未研究";
+            if (kind == SpellKind.Heal) return "恢复约" + (67 + (level - 1) * 10) + "%最大生命";
+            if (kind == SpellKind.Fury) return "强化持续" + (6 + (level - 1)) + "秒";
+            if (kind == SpellKind.Freeze) return "冻结持续" + (4 + (level - 1)) + "秒";
+            return "破墙半径" + (3.6f + (level - 1) * 0.6f).ToString("0.0") + "格";
+        }
         public static string BuildingData(Building b)
         {
             string stats = "生命 " + b.MaxHealth + " · 占地 " + b.Spec.Size + "×" + b.Spec.Size;
@@ -117,6 +167,8 @@ namespace Hearthhold.Core
             else if (b.Kind == BuildingKind.Barracks) stats += "\n营位 " + (45 + (b.Level - 1) * 15) + " · 全营总量受建造上限限制";
             else if (b.Kind == BuildingKind.TrainingCamp) stats += "\n解锁 " + (b.Level == 1 ? "先锋、游侠" : b.Level == 2 ? "先锋、游侠、铁卫、翼骑" : "全部八种兵");
             else if (b.Kind == BuildingKind.Laboratory) stats += "\n研究上限 " + b.Level + " 级 · 兵种生命/伤害每级约 +10%";
+            else if (b.Kind == BuildingKind.HeroHall) stats += "\n英雄等级上限 " + b.Level + " · 当前1个英雄出征槽";
+            else if (b.Kind == BuildingKind.PetLodge) stats += "\n战宠等级上限 " + b.Level + " · 每名英雄可绑定1只战宠";
             return stats;
         }
         static Rules()
@@ -148,7 +200,8 @@ namespace Hearthhold.Core
         }
         public static int BuildLimit(BuildingKind kind, int keepLevel)
         {
-            int tier = Math.Max(1, Math.Min(3, keepLevel));
+            // Progression changes must first be recorded in docs/PROGRESSION-AND-ECONOMY-CONTRACT.md.
+            int tier = Math.Max(1, Math.Min(4, keepLevel));
             switch (kind)
             {
                 case BuildingKind.Keep: return 1;
@@ -158,10 +211,15 @@ namespace Hearthhold.Core
                 case BuildingKind.Cannon: case BuildingKind.Watchtower: return 1 + tier;
                 case BuildingKind.Wall: return 10 + tier * 30;
                 case BuildingKind.TrainingCamp: case BuildingKind.Laboratory: return 1;
-                case BuildingKind.Mortar: case BuildingKind.AirDefense: case BuildingKind.ArcTower: case BuildingKind.BeamTower: return tier >= 2 ? 1 : 0;
+                case BuildingKind.HeroHall: return tier >= 4 ? 1 : 0;
+                case BuildingKind.PetLodge: return tier >= 4 ? 1 : 0;
+                case BuildingKind.Mortar: case BuildingKind.AirDefense: return tier >= 2 ? 1 : 0;
+                case BuildingKind.ArcTower: case BuildingKind.BeamTower: return tier >= 3 ? 1 : 0;
                 default: return 0;
             }
         }
+        public static int BuildingUnlockKeepLevel(BuildingKind kind)
+        { for (int level = 1; level <= 4; level++) if (BuildLimit(kind, level) > 0) return level; return 4; }
     }
 
     public sealed class Building
@@ -191,12 +249,16 @@ namespace Hearthhold.Core
 
     public sealed class Unit
     {
-        public int Id, X, Z, Health, Cooldown, TargetId = -1, PathRevision = -1, RepathTick, FuryTicks, SummonTicks, SummonerId = -1;
-        public bool IsSummon;
+        public int Id, X, Z, Health, Cooldown, TargetId = -1, TargetRevision = -1, PathRevision = -1, RepathTick, FuryTicks, SummonTicks, SummonerId = -1;
+        public bool IsSummon, IsHero, IsPet;
         public TroopKind Kind;
+        public HeroKind HeroKind;
+        public int HeroLevel;
+        public PetKind PetKind;
+        public int PetLevel, BondedHeroUnitId = -1;
         public List<Cell> Path = new List<Cell>();
         public int PathIndex;
-        public TroopSpec Spec { get { return Rules.Spec(Kind); } }
+        public TroopSpec Spec { get { return IsHero ? Rules.Spec(HeroKind).Combat : IsPet ? Rules.Spec(PetKind).Combat : Rules.Spec(Kind); } }
     }
 
     public sealed class CombatEffect
@@ -220,11 +282,19 @@ namespace Hearthhold.Core
         public long TrainingStartedUtcTicks;
         public List<int> TroopLevels = new List<int>();
         public int HealLevel = 1;
+        public List<int> SpellLevels = new List<int>();
+        public List<int> HeroLevels = new List<int>();
+        public List<int> PetLevels = new List<int>();
+        public List<int> HeroPetAssignments = new List<int>();
         public VillageData CopyForSave()
         {
             VillageData copy = (VillageData)MemberwiseClone();
             copy.ArmyCounts = new List<int>(ArmyCounts);
             copy.TroopLevels = new List<int>(TroopLevels);
+            copy.SpellLevels = new List<int>(SpellLevels);
+            copy.HeroLevels = new List<int>(HeroLevels);
+            copy.PetLevels = new List<int>(PetLevels);
+            copy.HeroPetAssignments = new List<int>(HeroPetAssignments);
             copy.TrainingQueue = new List<int>(TrainingQueue);
             return copy;
         }
@@ -242,7 +312,7 @@ namespace Hearthhold.Core
             v.Add(BuildingKind.Cannon, 15, 15);
             v.Add(BuildingKind.Watchtower, 23, 24);
             for (int x = 15; x <= 24; x++) v.Add(BuildingKind.Wall, x, 21);
-            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureArmy();
+            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureHeroes(); v.EnsureArmy();
             return v;
         }
         public Building Add(BuildingKind kind, int x, int z)
@@ -262,7 +332,13 @@ namespace Hearthhold.Core
         public int Count(BuildingKind kind) { int count = 0; foreach (Building b in Buildings) if (b.Kind == kind) count++; return count; }
         [XmlIgnore] public int TrainingCampLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.TrainingCamp) level = Math.Max(level, b.Level); return level; } }
         [XmlIgnore] public int LaboratoryLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.Laboratory) level = Math.Max(level, b.Level); return level; } }
+        [XmlIgnore] public int HeroHallLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.HeroHall) level = Math.Max(level, b.Level); return level; } }
+        [XmlIgnore] public int PetLodgeLevel { get { int level = 0; foreach (Building b in Buildings) if (b.Kind == BuildingKind.PetLodge) level = Math.Max(level, b.Level); return level; } }
+        public bool IsHeroUnlocked(HeroKind kind) { EnsureHeroes(); return HeroHallLevel > 0 && HeroLevels[(int)kind] > 0; }
+        public bool IsPetUnlocked(PetKind kind) { EnsureHeroes(); return PetLodgeLevel > 0 && PetLevels[(int)kind] > 0; }
         public bool IsTroopUnlocked(TroopKind kind) { return TrainingCampLevel >= Rules.UnlockCampLevel(kind); }
+        public int SpellLevel(SpellKind kind) { EnsureTechnology(); return SpellLevels[(int)kind]; }
+        public bool IsSpellUnlocked(SpellKind kind) { return SpellLevel(kind) > 0; }
         public int Limit(BuildingKind kind) { return Rules.BuildLimit(kind, KeepLevel); }
         public bool AtLimit(BuildingKind kind) { return Count(kind) >= Limit(kind); }
         [XmlIgnore] public int ArmyCapacity
@@ -323,6 +399,19 @@ namespace Hearthhold.Core
         {
             if (TroopLevels == null) TroopLevels = new List<int>();
             while (TroopLevels.Count < Rules.Troops.Length) TroopLevels.Add(1);
+            if (SpellLevels == null) SpellLevels = new List<int>();
+            if (SpellLevels.Count == 0) SpellLevels.Add(Math.Max(1, Math.Min(3, HealLevel)));
+            while (SpellLevels.Count < Rules.SpellNames.Length) SpellLevels.Add(0);
+            HealLevel = SpellLevels[(int)SpellKind.Heal];
+        }
+        public void EnsureHeroes()
+        {
+            if (HeroLevels == null) HeroLevels = new List<int>();
+            while (HeroLevels.Count < Rules.Heroes.Length) HeroLevels.Add(0);
+            if (PetLevels == null) PetLevels = new List<int>();
+            while (PetLevels.Count < Enum.GetValues(typeof(PetKind)).Length) PetLevels.Add(0);
+            if (HeroPetAssignments == null) HeroPetAssignments = new List<int>();
+            while (HeroPetAssignments.Count < Rules.Heroes.Length) HeroPetAssignments.Add(-1);
         }
         public void MigrateLegacy()
         {

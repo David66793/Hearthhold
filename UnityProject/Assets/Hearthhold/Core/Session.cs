@@ -14,7 +14,31 @@ namespace Hearthhold.Core
         private readonly Stack<LayoutMove> undo = new Stack<LayoutMove>();
         private readonly Stack<LayoutMove> redo = new Stack<LayoutMove>();
         private struct LayoutMove { public int Id, OldX, OldZ, NewX, NewZ; }
-        public GameSession(VillageData village) { Village = village; Village.EnsureProgress(); Village.EnsureTechnology(); Village.EnsureArmy(); }
+        public GameSession(VillageData village)
+        {
+            Village = village; Village.EnsureProgress(); Village.EnsureTechnology(); Village.EnsureHeroes(); Village.EnsureArmy();
+            CompleteLegacyTraining();
+        }
+        private bool CompleteLegacyTraining()
+        {
+            if (Village.TrainingQueue.Count == 0) { Village.TrainingStartedUtcTicks = 0; return false; }
+            bool changed = false; int completed = 0, refunded = 0;
+            foreach (int kind in Village.TrainingQueue)
+            {
+                if (kind < 0 || kind >= Rules.Troops.Length) continue;
+                if (Village.ArmyHousing + Rules.Troops[kind].Housing <= Village.ArmyCapacity)
+                { Village.ArmyCounts[kind]++; completed++; changed = true; }
+                else
+                {
+                    int refund = Math.Min(Rules.Troops[kind].TrainCost, Village.Capacity - Village.Gold);
+                    Village.Gold += refund; refunded += refund; changed = true;
+                }
+            }
+            Village.TrainingQueue.Clear(); Village.TrainingStartedUtcTicks = 0;
+            if (changed) Notice = "旧版训练队列已处理：" + completed + " 名立即就绪"
+                + (refunded > 0 ? "，超出营位的项目返还 " + refunded + " 金币" : "") + "。当前版本造兵无需等待。";
+            return changed;
+        }
         public bool Build(BuildingKind kind, int x, int z)
         {
             if (Battle != null) return false;
@@ -26,6 +50,16 @@ namespace Hearthhold.Core
             Collect(DateTime.UtcNow);
             Village.Gold -= cost;
             Village.Add(kind, x, z);
+            if (kind == BuildingKind.HeroHall)
+            {
+                Village.EnsureHeroes();
+                Village.HeroLevels[(int)HeroKind.EmberWarden] = Math.Max(1, Village.HeroLevels[(int)HeroKind.EmberWarden]);
+            }
+            if (kind == BuildingKind.PetLodge)
+            {
+                Village.EnsureHeroes(); Village.PetLevels[(int)PetKind.CinderFox] = Math.Max(1, Village.PetLevels[(int)PetKind.CinderFox]);
+                if (Village.HeroPetAssignments[(int)HeroKind.EmberWarden] < 0) Village.HeroPetAssignments[(int)HeroKind.EmberWarden] = (int)PetKind.CinderFox;
+            }
             undo.Clear(); redo.Clear();
             Notice = Rules.Spec(kind).Name + "建造完成。";
             return true;
@@ -80,11 +114,89 @@ namespace Hearthhold.Core
         }
         public int UpgradeGold(Building b) { return b.Kind == BuildingKind.Keep ? 650 * b.Level : Math.Max(80, b.Spec.Cost) * b.Level; }
         public int UpgradeCrystal(Building b) { return (b.Kind == BuildingKind.Keep ? 180 : 55) * b.Level; }
+        public List<Building> WallRow(int id)
+        {
+            Building origin = Find(id);
+            List<Building> result = new List<Building>();
+            if (origin == null || origin.Kind != BuildingKind.Wall) return result;
+            List<Building> horizontal = ConnectedWalls(origin, 1, 0);
+            List<Building> vertical = ConnectedWalls(origin, 0, 1);
+            return horizontal.Count >= vertical.Count ? horizontal : vertical;
+        }
+        private List<Building> ConnectedWalls(Building origin, int dx, int dz)
+        {
+            List<Building> result = new List<Building>();
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                int x = origin.X + dx * direction, z = origin.Z + dz * direction;
+                while (true)
+                {
+                    Building wall = Village.At(x, z);
+                    if (wall == null || wall.Kind != BuildingKind.Wall) break;
+                    if (direction < 0) result.Insert(0, wall); else result.Add(wall);
+                    x += dx * direction; z += dz * direction;
+                }
+            }
+            int insert = 0;
+            while (insert < result.Count && (dx != 0 ? result[insert].X : result[insert].Z) < (dx != 0 ? origin.X : origin.Z)) insert++;
+            result.Insert(insert, origin);
+            return result;
+        }
+        public bool UpgradeWallRow(IList<int> ids)
+        {
+            if (Battle != null || ids == null || ids.Count == 0) return false;
+            List<Building> walls = new List<Building>(); HashSet<int> seen = new HashSet<int>();
+            int gold = 0, crystal = 0;
+            foreach (int id in ids)
+            {
+                Building wall = Find(id);
+                if (wall == null || wall.Kind != BuildingKind.Wall || !seen.Add(id)) { Notice = "城墙排选择已失效，请重新选择。"; return false; }
+                if (wall.Level >= Rules.MaxBuildingLevel(wall.Kind)) { Notice = "所选城墙中有墙段已达到最高等级。"; return false; }
+                if (wall.Level >= Village.KeepLevel) { Notice = "请先升级议事堡，解锁城墙等级。"; return false; }
+                walls.Add(wall); gold += UpgradeGold(wall); crystal += UpgradeCrystal(wall);
+            }
+            Collect(DateTime.UtcNow);
+            if (Village.Gold < gold || Village.Crystal < crystal) { Notice = "整排升级需要 " + gold + " 金币 / " + crystal + " 晶露。"; return false; }
+            Village.Gold -= gold; Village.Crystal -= crystal;
+            foreach (Building wall in walls) { wall.Level++; wall.Health = wall.MaxHealth; }
+            Notice = "已将连续城墙 ×" + walls.Count + " 全部升级。";
+            return true;
+        }
+        public bool CanMoveWallRow(IList<int> ids, int anchorId, int targetX, int targetZ)
+        {
+            if (Battle != null || ids == null || ids.Count < 2) return false;
+            Building anchor = Find(anchorId);
+            if (anchor == null || anchor.Kind != BuildingKind.Wall) return false;
+            HashSet<int> movingIds = new HashSet<int>();
+            foreach (int id in ids)
+            {
+                Building wall = Find(id);
+                if (wall == null || wall.Kind != BuildingKind.Wall || !movingIds.Add(id)) return false;
+            }
+            int dx = targetX - anchor.X, dz = targetZ - anchor.Z;
+            foreach (int id in ids)
+            {
+                Building wall = Find(id); int x = wall.X + dx, z = wall.Z + dz;
+                if (x < 0 || z < 0 || x >= Rules.MapSize || z >= Rules.MapSize) return false;
+                foreach (Building other in Village.Buildings)
+                    if (!movingIds.Contains(other.Id) && other.Contains(x, z)) return false;
+            }
+            return true;
+        }
+        public bool MoveWallRow(IList<int> ids, int anchorId, int targetX, int targetZ)
+        {
+            if (!CanMoveWallRow(ids, anchorId, targetX, targetZ)) { Notice = "整排城墙无法放在这里：目标格越界或被占用。"; return false; }
+            Building anchor = Find(anchorId); int dx = targetX - anchor.X, dz = targetZ - anchor.Z;
+            foreach (int id in ids) { Building wall = Find(id); wall.X += dx; wall.Z += dz; }
+            undo.Clear(); redo.Clear();
+            Notice = "已整体移动连续城墙 ×" + ids.Count + "。";
+            return true;
+        }
         public bool Upgrade(int id)
         {
             if (Battle != null) return false;
             Building b = Find(id); if (b == null) return false;
-            if (b.Level >= 3) { Notice = "已达到原型的最高等级。"; return false; }
+            if (b.Level >= Rules.MaxBuildingLevel(b.Kind)) { Notice = "已达到当前版本的最高等级。"; return false; }
             if (b.Kind != BuildingKind.Keep && b.Level >= Village.KeepLevel) { Notice = "请先升级议事堡，解锁建筑等级。"; return false; }
             int gold = UpgradeGold(b), crystal = UpgradeCrystal(b);
             if (Village.Gold < gold || Village.Crystal < crystal) { Notice = "升级资源不足。"; return false; }
@@ -92,6 +204,37 @@ namespace Hearthhold.Core
             Village.Gold -= gold; Village.Crystal -= crystal; b.Level++; b.Health = b.MaxHealth;
             Notice = b.Spec.Name + "已升至 " + b.Level + " 级。";
             return true;
+        }
+        public bool UpgradeHero(HeroKind kind)
+        {
+            if (Battle != null || (int)kind < 0 || (int)kind >= Rules.Heroes.Length) return false;
+            Village.EnsureHeroes(); int level = Village.HeroLevels[(int)kind];
+            if (!Village.IsHeroUnlocked(kind)) { Notice = "先将议事堡升至4级并建造英雄殿堂。"; return false; }
+            if (level >= Village.HeroHallLevel || level >= 4) { Notice = level >= 4 ? "英雄已达到当前最高等级。" : "先升级英雄殿堂，提高英雄等级上限。"; return false; }
+            int gold = Rules.HeroUpgradeGold(level), crystal = Rules.HeroUpgradeCrystal(level);
+            if (Village.Gold < gold || Village.Crystal < crystal) { Notice = "英雄升级需要 " + gold + " 金币 / " + crystal + " 晶露。"; return false; }
+            Collect(DateTime.UtcNow); Village.Gold -= gold; Village.Crystal -= crystal; Village.HeroLevels[(int)kind]++;
+            Notice = Rules.Spec(kind).Name + "已升至 " + Village.HeroLevels[(int)kind] + " 级。"; return true;
+        }
+        public bool UpgradePet(PetKind kind)
+        {
+            if (Battle != null || (int)kind < 0 || (int)kind >= Rules.Pets.Length) return false;
+            Village.EnsureHeroes(); int level = Village.PetLevels[(int)kind];
+            if (!Village.IsPetUnlocked(kind)) { Notice = "先建造战宠小屋并解锁该战宠。"; return false; }
+            if (level >= Village.PetLodgeLevel || level >= 4) { Notice = level >= 4 ? "战宠已达到当前最高等级。" : "先升级战宠小屋，提高战宠等级上限。"; return false; }
+            int crystal = Rules.PetUpgradeCrystal(level);
+            if (Village.Crystal < crystal) { Notice = "战宠升级需要 " + crystal + " 晶露。"; return false; }
+            Collect(DateTime.UtcNow); Village.Crystal -= crystal; Village.PetLevels[(int)kind]++;
+            Notice = Rules.Spec(kind).Name + "已升至 " + Village.PetLevels[(int)kind] + " 级。"; return true;
+        }
+        public bool AssignPet(HeroKind hero, PetKind? pet)
+        {
+            if (Battle != null || (int)hero < 0 || (int)hero >= Rules.Heroes.Length) return false;
+            Village.EnsureHeroes(); int petIndex = pet.HasValue ? (int)pet.Value : -1;
+            if (!Village.IsHeroUnlocked(hero) || petIndex >= 0 && (petIndex >= Rules.Pets.Length || !Village.IsPetUnlocked(pet.Value))) { Notice = "英雄或战宠尚未解锁。"; return false; }
+            if (petIndex >= 0) for (int i = 0; i < Village.HeroPetAssignments.Count; i++) if (i != (int)hero && Village.HeroPetAssignments[i] == petIndex) Village.HeroPetAssignments[i] = -1;
+            Village.HeroPetAssignments[(int)hero] = petIndex;
+            Notice = petIndex < 0 ? Rules.Spec(hero).Name + "已取消战宠绑定。" : Rules.Spec(pet.Value).Name + "已绑定" + Rules.Spec(hero).Name + "。"; return true;
         }
         public bool ResearchTroop(TroopKind kind)
         {
@@ -107,15 +250,21 @@ namespace Hearthhold.Core
             Notice = Rules.Spec(kind).Name + "研究完成，升至 " + Village.TroopLevels[(int)kind] + " 级。";
             return true;
         }
-        public bool ResearchHeal()
+        public bool ResearchHeal() { return ResearchSpell(SpellKind.Heal); }
+        public bool ResearchSpell(SpellKind kind)
         {
-            if (Battle != null) return false;
-            if (Village.LaboratoryLevel <= Village.HealLevel) { Notice = "实验室等级不足，先升级实验室。"; return false; }
-            int gold = Rules.ResearchGold(Village.HealLevel), crystal = Rules.ResearchCrystal(Village.HealLevel);
+            if (Battle != null || (int)kind < 0 || (int)kind >= Rules.SpellNames.Length) return false;
+            Village.EnsureTechnology();
+            int level = Village.SpellLevels[(int)kind], unlock = Rules.SpellUnlockKeepLevel(kind);
+            if (Village.KeepLevel < unlock) { Notice = Rules.SpellNames[(int)kind] + "需要议事堡 " + unlock + " 级。"; return false; }
+            if (Village.LaboratoryLevel < unlock) { Notice = "先将实验室升至 " + unlock + " 级，解锁" + Rules.SpellNames[(int)kind] + "。"; return false; }
+            if (level >= 3 || level > 0 && Village.LaboratoryLevel <= level) { Notice = level >= 3 ? "该法术已达到最高等级。" : "实验室等级不足，先升级实验室。"; return false; }
+            int nextCostLevel = Math.Max(1, level), gold = Rules.ResearchGold(nextCostLevel), crystal = Rules.ResearchCrystal(nextCostLevel);
             if (Village.Gold < gold || Village.Crystal < crystal) { Notice = "研究资源不足：需要 " + gold + " 金 / " + crystal + " 晶。"; return false; }
             Collect(DateTime.UtcNow); Village.Gold -= gold; Village.Crystal -= crystal;
-            Village.HealLevel++;
-            Notice = "疗愈之雨研究完成，升至 " + Village.HealLevel + " 级。";
+            Village.SpellLevels[(int)kind] = level + 1;
+            Village.HealLevel = Village.SpellLevels[(int)SpellKind.Heal];
+            Notice = Rules.SpellNames[(int)kind] + (level == 0 ? "已解锁" : "研究完成，升至 " + (level + 1) + " 级") + "。";
             return true;
         }
         public void Income(DateTime utcNow, out int gold, out int crystal)
@@ -144,26 +293,7 @@ namespace Hearthhold.Core
         {
             Village.EnsureArmy();
             if (Battle != null) return false;
-            if (Village.TrainingQueue.Count == 0) { Village.TrainingStartedUtcTicks = 0; return false; }
-            if (Village.Count(BuildingKind.Barracks) == 0 || Village.Count(BuildingKind.TrainingCamp) == 0) return false;
-            if (Village.TrainingStartedUtcTicks <= 0 || Village.TrainingStartedUtcTicks > utcNow.Ticks)
-            { Village.TrainingStartedUtcTicks = utcNow.Ticks; return false; }
-            long elapsed = utcNow.Ticks - Village.TrainingStartedUtcTicks;
-            bool changed = false;
-            while (Village.TrainingQueue.Count > 0)
-            {
-                int kind = Village.TrainingQueue[0];
-                TroopSpec spec = Rules.Troops[kind];
-                long duration = (long)spec.TrainSeconds * TimeSpan.TicksPerSecond;
-                if (elapsed < duration || Village.ArmyHousing + spec.Housing > Village.ArmyCapacity) break;
-                elapsed -= duration;
-                Village.ArmyCounts[kind]++;
-                Village.TrainingQueue.RemoveAt(0);
-                changed = true;
-            }
-            Village.TrainingStartedUtcTicks = Village.TrainingQueue.Count == 0 ? 0 : utcNow.Ticks - elapsed;
-            if (changed) Notice = "训练完成，远征队已有 " + Village.ArmyHousing + " / " + Village.ArmyCapacity + " 营位。";
-            return changed;
+            return CompleteLegacyTraining();
         }
         public int TrainingSecondsLeft(DateTime utcNow)
         {
@@ -175,33 +305,27 @@ namespace Hearthhold.Core
             return Math.Max(0, spec.TrainSeconds - (int)(elapsed / TimeSpan.TicksPerSecond));
         }
         public bool QueueTroop(TroopKind kind, DateTime utcNow)
+        { return QueueTroops(kind, 1, utcNow); }
+        public bool QueueTroops(TroopKind kind, int count, DateTime utcNow)
         {
-            if (Battle != null || (int)kind < 0 || (int)kind >= Rules.Troops.Length) return false;
-            AdvanceTraining(utcNow);
+            if (Battle != null || (int)kind < 0 || (int)kind >= Rules.Troops.Length || count < 1 || count > 20) return false;
             TroopSpec spec = Rules.Spec(kind);
             if (Village.Count(BuildingKind.Barracks) == 0) { Notice = "请先建造兵营。"; return false; }
+            if (Village.Count(BuildingKind.TrainingCamp) == 0) { Notice = "请先建造训练营。"; return false; }
             if (!Village.IsTroopUnlocked(kind)) { Notice = "先升级训练营，解锁" + spec.Name + "。"; return false; }
-            if (Village.ArmyHousing + Village.QueuedHousing + spec.Housing > Village.ArmyCapacity) { Notice = "营位不足。升级或增建兵营，或调整现有编队。"; return false; }
-            if (Village.Gold < spec.TrainCost) { Notice = "训练金币不足。"; return false; }
-            Village.Gold -= spec.TrainCost;
-            if (Village.TrainingQueue.Count == 0) Village.TrainingStartedUtcTicks = utcNow.Ticks;
-            Village.TrainingQueue.Add((int)kind);
-            Notice = spec.Name + "已加入训练队列 · " + spec.TrainSeconds + "秒。";
+            if (Village.ArmyHousing + (long)spec.Housing * count > Village.ArmyCapacity)
+            { Notice = "需要 " + spec.Housing * count + " 营位；请扩建兵营或调整现有编队。"; return false; }
+            if (Village.Gold < (long)spec.TrainCost * count)
+            { Notice = "训练 " + count + " 名" + spec.Name + "需要 " + spec.TrainCost * count + " 金币。"; return false; }
+            Village.Gold -= spec.TrainCost * count;
+            Village.ArmyCounts[(int)kind] += count;
+            Notice = count + " 名" + spec.Name + "已立即就绪 · 共 " + spec.Housing * count + " 营位。";
             return true;
         }
         public bool CancelLastTraining(DateTime utcNow)
         {
             if (Battle != null) return false;
-            AdvanceTraining(utcNow);
-            if (Village.TrainingQueue.Count == 0) { Notice = "训练队列为空。"; return false; }
-            int last = Village.TrainingQueue.Count - 1, kind = Village.TrainingQueue[last];
-            int refund = Rules.Troops[kind].TrainCost;
-            if (Village.Gold + refund > Village.Capacity) { Notice = "仓库空间不足，先消费金币再取消并领取完整退款。"; return false; }
-            Village.TrainingQueue.RemoveAt(last);
-            Village.Gold += refund;
-            if (Village.TrainingQueue.Count == 0) Village.TrainingStartedUtcTicks = 0;
-            Notice = "已取消队尾的" + Rules.Troops[kind].Name + "并返还金币。";
-            return true;
+            Notice = "当前版本造兵立即完成，没有可取消的训练队列。"; return false;
         }
         public bool DismissTroop(TroopKind kind)
         {
@@ -215,25 +339,23 @@ namespace Hearthhold.Core
         public bool QueueFormation(int preset, DateTime utcNow)
         {
             if (Battle != null || preset < 0 || preset >= Rules.FormationCounts.Length) return false;
-            AdvanceTraining(utcNow);
             int[] counts = Rules.FormationCounts[preset], missing = new int[counts.Length];
             int cost = 0, housing = 0, soldiers = 0;
             for (int i = 0; i < counts.Length; i++)
             {
-                missing[i] = Math.Max(0, counts[i] - Village.ArmyCounts[i] - Village.QueuedCount((TroopKind)i));
+                missing[i] = Math.Max(0, counts[i] - Village.ArmyCounts[i]);
                 if (missing[i] > 0 && !Village.IsTroopUnlocked((TroopKind)i)) { Notice = "训练营尚未解锁" + Rules.Troops[i].Name + "；请选择其他编队。"; return false; }
                 cost += missing[i] * Rules.Troops[i].TrainCost;
                 housing += missing[i] * Rules.Troops[i].Housing;
                 soldiers += missing[i];
             }
             if (soldiers == 0) { Notice = Rules.FormationNames[preset] + "已达到目标人数，无需补兵。"; return false; }
-            if (Village.ArmyHousing + Village.QueuedHousing + housing > Village.ArmyCapacity)
+            if (Village.ArmyHousing + housing > Village.ArmyCapacity)
             { Notice = "补齐" + Rules.FormationNames[preset] + "需要 " + housing + " 营位；请调整现有编队或扩建兵营。"; return false; }
             if (Village.Gold < cost) { Notice = "补齐" + Rules.FormationNames[preset] + "需要 " + cost + " 金币，当前只有 " + Village.Gold + "。"; return false; }
             Village.Gold -= cost;
-            if (Village.TrainingQueue.Count == 0) Village.TrainingStartedUtcTicks = utcNow.Ticks;
-            for (int i = 0; i < missing.Length; i++) for (int n = 0; n < missing[i]; n++) Village.TrainingQueue.Add(i);
-            Notice = Rules.FormationNames[preset] + "已补入 " + soldiers + " 名士兵 · " + housing + " 营位。";
+            for (int i = 0; i < missing.Length; i++) Village.ArmyCounts[i] += missing[i];
+            Notice = Rules.FormationNames[preset] + "已立即补齐 " + soldiers + " 名士兵 · " + housing + " 营位。";
             return true;
         }
         public void BeginBattle()
@@ -243,9 +365,10 @@ namespace Hearthhold.Core
             if (MissionIndex < 0 || MissionIndex >= Missions.Count) MissionIndex = 0;
             if (!Village.IsMissionUnlocked(MissionIndex)) { Notice = "该关卡尚未解锁。先在上一关获得至少1颗星。"; return; }
             AdvanceTraining(DateTime.UtcNow);
-            if (Village.ArmyHousing <= 0) { Notice = "远征队为空。打开编队 / 训练，准备士兵后再出发。"; return; }
+            bool heroReady = Village.IsHeroUnlocked(HeroKind.EmberWarden);
+            if (Village.ArmyHousing <= 0 && !heroReady) { Notice = "远征队为空。打开编队 / 训练，准备士兵后再出发。"; return; }
             int[] army = Village.ArmyCounts.ToArray();
-            Battle = new Battle(Missions.Create(MissionIndex), MissionIndex, army, Village.TroopLevels.ToArray(), Village.HealLevel);
+            Battle = new Battle(Missions.Create(MissionIndex), MissionIndex, army, Village.TroopLevels.ToArray(), Village.SpellLevels.ToArray(), heroReady ? Village.HeroLevels.ToArray() : null, Village.PetLevels.ToArray(), Village.HeroPetAssignments.ToArray());
             for (int i = 0; i < Village.ArmyCounts.Count; i++) Village.ArmyCounts[i] = 0;
             Notice = "侦察阶段 · 本次编队 " + Battle.InitialHousing + " 营位；投下第一名士兵后开始计时。";
         }
@@ -300,7 +423,7 @@ namespace Hearthhold.Core
         {
             if (Battle == null || Battle.Settled) return false;
             for (int i = 0; i < Battle.Available.Length; i++) Village.ArmyCounts[i] += Battle.Available[i];
-            foreach (Unit unit in Battle.Units) if (!unit.IsSummon) Village.ArmyCounts[(int)unit.Kind]++;
+            foreach (Unit unit in Battle.Units) if (!unit.IsSummon && !unit.IsHero && !unit.IsPet) Village.ArmyCounts[(int)unit.Kind]++;
             Battle = null;
             Notice = "未结算的远征已放弃，出征阵容已返回营地。";
             return true;
@@ -385,9 +508,14 @@ namespace Hearthhold.Core
         {
             if (v == null || (v.Version != 1 && v.Version != 2) || v.Buildings == null || v.Buildings.Count > 1200 || v.Wins < 0)
                 throw new InvalidDataException("不支持的存档版本或数据。");
-            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureArmy();
-            if (v.TroopLevels.Count != Rules.Troops.Length || v.HealLevel < 1 || v.HealLevel > 3) throw new InvalidDataException("科技数据无效。");
+            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureHeroes(); v.EnsureArmy();
+            if (v.TroopLevels.Count != Rules.Troops.Length || v.SpellLevels.Count != Rules.SpellNames.Length || v.HealLevel < 1 || v.HealLevel > 3) throw new InvalidDataException("科技数据无效。");
             foreach (int level in v.TroopLevels) if (level < 1 || level > 3) throw new InvalidDataException("兵种等级无效。");
+            for (int i = 0; i < v.SpellLevels.Count; i++) if (v.SpellLevels[i] < 0 || v.SpellLevels[i] > 3 || i == 0 && v.SpellLevels[i] < 1) throw new InvalidDataException("法术科技数据无效。");
+            if (v.HeroLevels.Count != Rules.Heroes.Length || v.PetLevels.Count != Rules.Pets.Length || v.HeroPetAssignments.Count != Rules.Heroes.Length) throw new InvalidDataException("英雄或战宠数据无效。");
+            foreach (int level in v.HeroLevels) if (level < 0 || level > 4) throw new InvalidDataException("英雄等级无效。");
+            foreach (int level in v.PetLevels) if (level < 0 || level > 4) throw new InvalidDataException("战宠等级无效。");
+            HashSet<int> assignedPets = new HashSet<int>(); foreach (int pet in v.HeroPetAssignments) if (pet < -1 || pet >= Rules.Pets.Length || pet >= 0 && !assignedPets.Add(pet)) throw new InvalidDataException("战宠绑定数据无效。");
             if (v.CampaignStars.Count != Missions.Count || v.CampaignBest.Count != Missions.Count || v.ClaimedAchievements.Count > Achievements.Specs.Length)
                 throw new InvalidDataException("战役进度数据无效。");
             for (int i = 0; i < Missions.Count; i++) if (v.CampaignStars[i] < 0 || v.CampaignStars[i] > 3 || v.CampaignBest[i] < 0 || v.CampaignBest[i] > 100)
@@ -403,7 +531,7 @@ namespace Hearthhold.Core
             int keepCount = 0, maxId = 0;
             foreach (Building b in v.Buildings)
             {
-                if (b == null || b.Id <= 0 || !ids.Add(b.Id) || (int)b.Kind < 0 || (int)b.Kind >= Rules.Buildings.Length || b.Level < 1 || b.Level > 3)
+                if (b == null || b.Id <= 0 || !ids.Add(b.Id) || (int)b.Kind < 0 || (int)b.Kind >= Rules.Buildings.Length || b.Level < 1 || b.Level > Rules.MaxBuildingLevel(b.Kind))
                     throw new InvalidDataException("建筑数据无效。");
                 maxId = Math.Max(maxId, b.Id);
                 if (b.Kind == BuildingKind.Keep) keepCount++;

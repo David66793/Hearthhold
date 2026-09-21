@@ -12,38 +12,6 @@ UnityProject/*.sln
 
 # Local builds, installers, test data and saves
 artifacts/*
-!artifacts/screenshots/
-artifacts/screenshots/*
-!artifacts/screenshots/01-home.png
-!artifacts/screenshots/18-unity-home.png
-!artifacts/screenshots/20-unity-home-v04.png
-!artifacts/screenshots/21-unity-battle-v04.png
-!artifacts/screenshots/23-unity-home-v05.png
-!artifacts/screenshots/24-unity-campaign-v05.png
-!artifacts/screenshots/25-unity-final-mission-v05.png
-!artifacts/screenshots/26-native-training-v06.png
-!artifacts/screenshots/27-unity-home-v06.png
-!artifacts/screenshots/28-unity-campaign-v06.png
-!artifacts/screenshots/29-unity-training-v06.png
-!artifacts/screenshots/30-unity-battle-v06.png
-!artifacts/screenshots/31-unity-home-v061.png
-!artifacts/screenshots/32-unity-campaign-v061.png
-!artifacts/screenshots/33-unity-training-v061.png
-!artifacts/screenshots/34-unity-battle-v061.png
-!artifacts/screenshots/35-unity-deploy-v061.png
-!artifacts/screenshots/36-unity-home-v062.png
-!artifacts/screenshots/38-unity-training-v062.png
-!artifacts/screenshots/39-unity-battle-v062.png
-!artifacts/screenshots/40-unity-deploy-v062.png
-!artifacts/screenshots/43-unity-home-v063.png
-!artifacts/screenshots/46-unity-battle-v063.png
-!artifacts/screenshots/47-unity-deploy-v063.png
-!artifacts/screenshots/51-unity-training-v070.png
-!artifacts/screenshots/52-unity-research-v070.png
-!artifacts/screenshots/53-unity-battle-v070.png
-!artifacts/screenshots/54-unity-deploy-v070.png
-!artifacts/screenshots/64-unity-training-v090.png
-!artifacts/screenshots/66-unity-battle-v090.png
 # Unused source rigs; the referenced troop rigs and their Unity metadata remain tracked.
 UnityProject/Assets/Hearthhold/Resources/ThirdParty/KayKitAdventurers/Barbarian.fbx*
 UnityProject/Assets/Hearthhold/Resources/ThirdParty/KayKitAdventurers/Rogue.fbx*

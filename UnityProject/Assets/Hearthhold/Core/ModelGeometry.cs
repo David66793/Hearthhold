@@ -62,6 +62,8 @@ namespace Hearthhold.Core
                 case BuildingKind.AirDefense: AirDefense(m, level); break;
                 case BuildingKind.ArcTower: ArcTower(m, level); break;
                 case BuildingKind.BeamTower: BeamTower(m, level); break;
+                case BuildingKind.HeroHall: HeroHall(m, level); break;
+                case BuildingKind.PetLodge: PetLodge(m, level); break;
             }
             return m;
         }
@@ -166,6 +168,22 @@ namespace Hearthhold.Core
             }
             foreach (ModelFace face in m.Faces)
                 for (int i = 0; i < face.Points.Length; i++) face.Points[i] = face.Points[i] * scale;
+            return m;
+        }
+        public static ModelMesh Pet(PetKind kind)
+        {
+            ModelMesh m = new ModelMesh();
+            int fur = kind == PetKind.CinderFox ? 0xC65A37 : 0x58745A, dark = kind == PetKind.CinderFox ? 0x6D3028 : 0x344B3B;
+            BevelBox(m, -0.48f, 0.35f, -0.25f, 0.96f, 0.5f, 0.72f, 0.16f, fur);
+            BevelBox(m, -0.36f, 0.65f, 0.28f, 0.72f, 0.58f, 0.62f, 0.17f, fur);
+            Frustum(m, -0.22f, 1.15f, 0.36f, 0.18f, 0.03f, 0.42f, 4, dark);
+            Frustum(m, 0.22f, 1.15f, 0.36f, 0.18f, 0.03f, 0.42f, 4, dark);
+            Box(m, -0.24f, 0.91f, 0.86f, 0.12f, 0.1f, 0.08f, 0xFFF0B5);
+            Box(m, 0.12f, 0.91f, 0.86f, 0.12f, 0.1f, 0.08f, 0xFFF0B5);
+            for (int i = 0; i < 4; i++) BevelBox(m, -0.4f + i % 2 * 0.58f, 0.03f, -0.2f + i / 2 * 0.45f, 0.22f, 0.48f, 0.22f, 0.06f, dark);
+            Beam(m, P(0, 0.72f, -0.22f), P(-0.72f, 1.05f, -0.58f), 0.18f, fur);
+            Frustum(m, -0.77f, 1.07f, -0.62f, 0.25f, 0.05f, 0.42f, 8, kind == PetKind.CinderFox ? Glow : Crystal);
+            BevelBox(m, -0.48f, 0.67f, 0.14f, 0.96f, 0.13f, 0.16f, 0.04f, Brass);
             return m;
         }
         private static void Mortar(ModelMesh m, int level)
@@ -311,6 +329,26 @@ namespace Hearthhold.Core
             Frustum(m, 1.5f, 2.42f, 1.5f, 0.39f, 0.17f, 0.76f, 8, Crystal);
             Frustum(m, 1.5f, 3.16f, 1.5f, 0.18f, 0, 0.42f, 8, Glow);
             for (int i = 0; i < 3; i++) Frustum(m, 0.61f + i * 0.88f, 0.37f, 0.61f, 0.13f, 0.05f, 0.55f + level * 0.13f, 6, Crystal);
+        }
+        private static void HeroHall(ModelMesh m, int level)
+        {
+            BevelBox(m, 0.25f, 0.34f, 0.25f, 2.5f, 1.25f, 2.5f, 0.1f, DarkStone);
+            BevelBox(m, 0.42f, 1.57f, 0.42f, 2.16f, 0.34f, 2.16f, 0.08f, Brass);
+            Frustum(m, 1.5f, 1.9f, 1.5f, 1.38f, 0.25f, 1.05f, 4, Red);
+            Arch(m, 1.02f, 0.34f, 2.76f, 0.96f, 1.15f, true);
+            Beam(m, P(0.48f, 0.42f, 2.72f), P(0.48f, 2.52f, 2.72f), 0.07f, Metal);
+            Flag(m, 0.54f, 2.4f, 0.62f, 0.72f, level >= 3 ? Crystal : Red);
+            for (int i = 0; i < level; i++) Frustum(m, 0.7f + i * 0.5f, 1.92f, 0.38f, 0.1f, 0.02f, 0.38f, 6, Glow);
+        }
+        private static void PetLodge(ModelMesh m, int level)
+        {
+            BevelBox(m, 0.3f, 0.34f, 0.35f, 2.4f, 1.05f, 2.25f, 0.12f, Wood);
+            GableRoof(m, 0.16f, 1.38f, 0.2f, 2.68f, 2.55f, 0.76f, Red);
+            Arch(m, 1.03f, 0.34f, 2.63f, 0.94f, 0.86f, true);
+            Frustum(m, 1.5f, 1.62f, 2.63f, 0.28f, 0.18f, 0.16f, 8, Brass);
+            for (int i = 0; i < level; i++) Frustum(m, 0.55f + i * 0.58f, 0.42f, 2.7f, 0.12f, 0.05f, 0.25f, 6, Glow);
+            Beam(m, P(0.42f, 0.38f, 0.42f), P(0.92f, 0.7f, 0.42f), 0.07f, Timber);
+            Beam(m, P(0.92f, 0.7f, 0.42f), P(1.25f, 0.36f, 0.42f), 0.07f, Timber);
         }
         private static void Cannon(ModelMesh m, int level)
         {
