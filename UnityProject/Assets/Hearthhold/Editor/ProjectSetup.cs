@@ -6,6 +6,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using TMPro;
 
 namespace Hearthhold.Editor
 {
@@ -30,9 +31,11 @@ namespace Hearthhold.Editor
             ConfigureGeneratedTexture("Assets/Hearthhold/Resources/GeneratedArt/CannonV061.png");
             ConfigureGeneratedTexture("Assets/Hearthhold/Resources/GeneratedArt/WatchtowerV061.png");
             ConfigureGeneratedTexture("Assets/Hearthhold/Resources/GeneratedArt/TroopAtlasV061.png");
+            ConfigureGeneratedTexture("Assets/Hearthhold/Resources/UI/ExpeditionEmblemV1.png");
             Directory.CreateDirectory("Assets/Hearthhold/Settings");
             Directory.CreateDirectory("Assets/Hearthhold/Resources");
             Directory.CreateDirectory("Assets/Hearthhold/Scenes");
+            EnsureTmpEssentials();
             const string pipelinePath = "Assets/Hearthhold/Settings/HearthholdURP.asset";
             UniversalRenderPipelineAsset pipeline = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(pipelinePath);
             if (pipeline == null)
@@ -46,6 +49,7 @@ namespace Hearthhold.Editor
             }
             GraphicsSettings.defaultRenderPipeline = pipeline;
             QualitySettings.renderPipeline = pipeline;
+            EnsureAlwaysIncludedShader("TextMeshPro/Mobile/Distance Field");
             if (AssetDatabase.LoadAssetAtPath<Material>("Assets/Hearthhold/Resources/ModelPalette.mat") == null)
             {
                 Shader shader = Shader.Find("Hearthhold/VertexLit");
@@ -72,7 +76,7 @@ namespace Hearthhold.Editor
             }
             PlayerSettings.companyName = "Hearthhold Studio";
             PlayerSettings.productName = "Hearthhold";
-            PlayerSettings.bundleVersion = "0.12.1-preview";
+            PlayerSettings.bundleVersion = "0.13.0-preview";
             PlayerSettings.defaultScreenWidth = 1440;
             PlayerSettings.defaultScreenHeight = 900;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
@@ -115,6 +119,24 @@ namespace Hearthhold.Editor
             importer.filterMode = FilterMode.Bilinear;
             importer.maxTextureSize = 2048;
             importer.SaveAndReimport();
+        }
+
+        private static void EnsureAlwaysIncludedShader(string shaderName)
+        {
+            Shader shader = Shader.Find(shaderName);
+            if (shader == null) throw new BuildFailedException("Required shader failed to import: " + shaderName);
+            SerializedObject graphics = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset")[0]);
+            SerializedProperty shaders = graphics.FindProperty("m_AlwaysIncludedShaders");
+            for (int i = 0; i < shaders.arraySize; i++) if (shaders.GetArrayElementAtIndex(i).objectReferenceValue == shader) return;
+            shaders.InsertArrayElementAtIndex(shaders.arraySize);
+            shaders.GetArrayElementAtIndex(shaders.arraySize - 1).objectReferenceValue = shader;
+            graphics.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void EnsureTmpEssentials()
+        {
+            if (Shader.Find("TextMeshPro/Mobile/Distance Field") != null && Resources.Load<TMP_Settings>("TMP Settings") != null) return;
+            throw new BuildFailedException("TMP Essential Resources are missing from Assets/TextMesh Pro. Restore the tracked package resources before building.");
         }
 
         [MenuItem("Hearthhold/Open main scene")]

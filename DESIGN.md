@@ -59,12 +59,36 @@ Color is never the only state signal: combine it with text, iconography, outline
 
 ## World interaction
 
+- Mouse interaction is primary; keyboard shortcuts are accelerators, never the only discoverable path. Every frequent action must have a visible clickable control, and map editing must be completable without a keyboard.
+- Labels describe the mouse action first. Shortcut hints may follow in a quieter secondary position instead of leading the control name.
+
 - Every building is anchored to the south-west corner of its integer footprint; its visual center is `(x + size/2, z + size/2)`.
 - Placement previews, colliders, shadows, selection marks, and saved coordinates must use the same footprint.
 - A single wall occupies exactly one cell. Its selection feedback is a mint square cell outline, not a circular aura, so placement coordinates are unambiguous and distinguishable from the wall's gold trim.
 - “Select row” chooses only straight, contiguous, axis-aligned wall segments. It stops at gaps and corners. Batch upgrade and batch move are atomic; batch demolition is intentionally unavailable to prevent accidental loss.
 - Wall-row movement previews every destination cell together. The complete 1×1 outline renders above world depth so a tall wall cannot visually hide the rear edges and create a false offset.
 - Move, build, cancel, upgrade, and select actions must immediately update both world feedback and the inspector.
+
+## Formation editor
+
+Village layout editing uses a distinct tactical-workbench mode rather than overloading ordinary building selection.
+
+- The left tool rail exposes Select all, Move selection, Clear to tray, Grid, Finish, and Cancel as visible mouse controls.
+- Select all includes every currently placed building. Group movement is atomic: if any footprint would leave the editable map or collide with an unselected building, nothing moves.
+- Clear to tray removes buildings only from the in-memory editing layout. It never saves an incomplete village. Finish remains unavailable until every staged building is placed; Cancel restores the exact entry layout.
+- The bottom tray supports both click-then-place and drag-to-map placement. Cards show building identity, level, footprint, and staged count without relying on keyboard input.
+- The grid is on by default in editing mode and may be toggled with a visible control. Valid placement uses mint, invalid placement uses coral, and selected/group bounds use ember gold.
+- Editing notices state the next mouse action. Keyboard shortcuts, when present, remain optional and are documented in Help.
+
+## Runtime UI foundation
+
+- Player-facing runtime UI uses Unity uGUI and TextMesh Pro. IMGUI is retained only for legacy screens while they are migrated and for development diagnostics.
+- The visual language is the **forge command table**: iron-green structural surfaces, bronze for primary actions and resources, patina for interaction, parchment for readable text, and ember only for danger or urgent state.
+- The map is the visual hero. Permanent HUD occupies the outer edge, uses restrained ornament, and never covers the central planning area without a modal backdrop.
+- Components are reusable prefabs or programmatic equivalents with Canvas Scaler support; new screens must not introduce hard-coded IMGUI rectangles.
+- Decorative generated art must be original, stored under `Resources/UI`, referenced by a shipped screen, and remain legible at its smallest target size.
+- Legacy IMGUI screens use the same forge-command-table skin during migration. Opening a modal must not reveal the old unstyled HUD or default Unity button gradients.
+- Chinese UI copy uses one regular-weight sans-serif family. Hierarchy comes from size, color, and spacing; synthetic bold is avoided because it distorts dense Chinese glyphs.
 
 ## Motion and feedback
 

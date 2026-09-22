@@ -1,6 +1,6 @@
 {
   "name": "Hearthhold.Runtime",
   "rootNamespace": "Hearthhold.UnityClient",
-  "references": ["Hearthhold.Core"],
+  "references": ["Hearthhold.Core", "UnityEngine.UI", "Unity.TextMeshPro"],
   "autoReferenced": true
 }

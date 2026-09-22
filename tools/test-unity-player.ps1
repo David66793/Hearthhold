@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('All', 'Home', 'BuildCatalog', 'WallRow', 'WallAxes', 'Heroes', 'Pets', 'Campaign', 'Training', 'Research', 'Progression', 'Battle', 'Deploy', 'Rotated', 'Detail', 'ArmyDetail', 'MainTroops', 'RemainingTroops', 'Casters', 'SavedVillage')][string]$Case = 'All',
+    [ValidateSet('All', 'Home', 'HomeSmall', 'BuildCatalog', 'WallRow', 'WallAxes', 'LayoutEditor', 'LayoutTray', 'LayoutEditorSmall', 'Heroes', 'Pets', 'Campaign', 'Training', 'Research', 'Progression', 'Battle', 'Deploy', 'Rotated', 'Detail', 'ArmyDetail', 'MainTroops', 'RemainingTroops', 'Casters', 'SavedVillage')][string]$Case = 'All',
     [string]$PlayerPath = '',
     [string]$SaveSource = ''
 )
@@ -17,11 +17,11 @@ $taskScreenshots = Join-Path $taskRoot 'artifacts\screenshots'
 $taskLogs = Join-Path $taskRoot 'artifacts\UnityLogs'
 New-Item -ItemType Directory -Path $taskScreenshots, $taskLogs -Force | Out-Null
 
-function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode) {
+function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode, [int]$Width = 1440, [int]$Height = 900) {
     $taskShot = Join-Path $taskScreenshots $FileName
     $taskLog = Join-Path $taskLogs ('player-smoke-' + $Name + '.log')
     $taskArguments = @(
-        '-force-d3d11', '-screen-width', '1440', '-screen-height', '900', '-popupwindow',
+        '-force-d3d11', '-screen-fullscreen', '0', '-screen-width', $Width, '-screen-height', $Height,
         '-hearthhold-smoke', ('"' + $taskShot + '"')
     )
     if ($Mode -eq 'Battle') { $taskArguments += '-hearthhold-smoke-battle' }
@@ -33,6 +33,8 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode)
     if ($Mode -eq 'BuildCatalog') { $taskArguments += '-hearthhold-smoke-build-catalog' }
     if ($Mode -eq 'WallRow') { $taskArguments += '-hearthhold-smoke-wall-row' }
     if ($Mode -eq 'WallAxes') { $taskArguments += '-hearthhold-smoke-wall-axes' }
+    if ($Mode -eq 'LayoutEditor') { $taskArguments += '-hearthhold-smoke-layout-editor' }
+    if ($Mode -eq 'LayoutTray') { $taskArguments += '-hearthhold-smoke-layout-tray' }
     if ($Mode -eq 'Heroes') { $taskArguments += '-hearthhold-smoke-heroes' }
     if ($Mode -eq 'Pets') { $taskArguments += '-hearthhold-smoke-pets' }
     if ($Mode -eq 'Rotated') { $taskArguments += '-hearthhold-smoke-rotated' }
@@ -70,8 +72,11 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode)
     if ($Mode -eq 'Battle' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_SPELL_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no four-spell validation marker: ' + $taskLog) }
     if ($Mode -eq 'Battle' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HERO_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no independent hero deployment and skill marker: ' + $taskLog) }
     if ($Mode -eq 'Home' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_EXTERNAL_MODEL_READY: ThirdParty/KayKitMedieval/Keep' -SimpleMatch -Quiet)) { throw ($Name + ' log has no external settlement-model marker: ' + $taskLog) }
+    if ($Mode -eq 'Home' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_MODERN_HUD_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no uGUI/TextMesh Pro HUD marker: ' + $taskLog) }
     if ($Mode -eq 'WallRow' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_WALL_ROW_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no continuous wall-row selection marker: ' + $taskLog) }
     if ($Mode -eq 'WallAxes' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_WALL_AXES_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no two-axis wall-alignment marker: ' + $taskLog) }
+    if (($Mode -eq 'LayoutEditor' -or $Mode -eq 'LayoutTray') -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_LAYOUT_EDITOR_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no layout-editor marker: ' + $taskLog) }
+    if ($Mode -eq 'LayoutTray' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_LAYOUT_PLACEMENT_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no successful tray-to-map placement marker: ' + $taskLog) }
     if (($Mode -eq 'Heroes' -or $Mode -eq 'Pets') -and (-not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HERO_HALL_SMOKE_READY:' -SimpleMatch -Quiet) -or -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_ROSTER_PREVIEW_READY:' -SimpleMatch -Quiet))) { throw ($Name + ' log has no animated hero roster marker: ' + $taskLog) }
     if ($Mode -eq 'SavedVillage' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_SAVED_VILLAGE_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no loaded-village marker: ' + $taskLog) }
     if ($Mode -eq 'Battle' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_EXTERNAL_MODEL_READY: ThirdParty/QuaterniusRPG/Warrior' -SimpleMatch -Quiet)) { throw ($Name + ' log has no external troop-model marker: ' + $taskLog) }
@@ -101,9 +106,13 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode)
 }
 
 if ($Case -eq 'All' -or $Case -eq 'Home') { Invoke-HearthholdSmoke 'home-v090' '62-unity-home-v090.png' 'Home' }
+if ($Case -eq 'HomeSmall') { Invoke-HearthholdSmoke 'home-small-v130' '89-unity-home-1280x720-v130.png' 'Home' 1280 720 }
 if ($Case -eq 'All' -or $Case -eq 'BuildCatalog') { Invoke-HearthholdSmoke 'build-catalog-v120' '81-unity-build-catalog-v120.png' 'BuildCatalog' }
 if ($Case -eq 'All' -or $Case -eq 'WallRow') { Invoke-HearthholdSmoke 'wall-row-v120' '82-unity-wall-row-v120.png' 'WallRow' }
 if ($Case -eq 'All' -or $Case -eq 'WallAxes') { Invoke-HearthholdSmoke 'wall-axes-v121' '85-unity-wall-axes-v121.png' 'WallAxes' }
+if ($Case -eq 'All' -or $Case -eq 'LayoutEditor') { Invoke-HearthholdSmoke 'layout-editor-v130' '86-unity-layout-editor-v130.png' 'LayoutEditor' }
+if ($Case -eq 'All' -or $Case -eq 'LayoutTray') { Invoke-HearthholdSmoke 'layout-tray-v130' '87-unity-layout-tray-v130.png' 'LayoutTray' }
+if ($Case -eq 'LayoutEditorSmall') { Invoke-HearthholdSmoke 'layout-editor-small-v130' '88-unity-layout-editor-1280x720-v130.png' 'LayoutEditor' 1280 720 }
 if ($Case -eq 'All' -or $Case -eq 'Heroes') { Invoke-HearthholdSmoke 'heroes-v120' '83-unity-heroes-v120.png' 'Heroes' }
 if ($Case -eq 'All' -or $Case -eq 'Pets') { Invoke-HearthholdSmoke 'pets-v120' '84-unity-pets-v120.png' 'Pets' }
 if ($Case -eq 'SavedVillage') { Invoke-HearthholdSmoke 'saved-village-v111' '77-unity-saved-village-v111.png' 'SavedVillage' }

@@ -192,6 +192,30 @@ namespace Hearthhold.Core
             Notice = "已整体移动连续城墙 ×" + ids.Count + "。";
             return true;
         }
+        public bool CanMoveGroup(IList<int> ids, int dx, int dz)
+        {
+            if (Battle != null || ids == null || ids.Count == 0) return false;
+            HashSet<int> movingIds = new HashSet<int>();
+            foreach (int id in ids) if (Find(id) == null || !movingIds.Add(id)) return false;
+            foreach (int id in ids)
+            {
+                Building movingBuilding = Find(id);
+                int x = movingBuilding.X + dx, z = movingBuilding.Z + dz, size = movingBuilding.Spec.Size;
+                if (x < 2 || z < 2 || x + size > Rules.MapSize - 2 || z + size > Rules.MapSize - 2) return false;
+                foreach (Building other in Village.Buildings)
+                    if (!movingIds.Contains(other.Id) && x < other.X + other.Spec.Size && x + size > other.X
+                        && z < other.Z + other.Spec.Size && z + size > other.Z) return false;
+            }
+            return true;
+        }
+        public bool MoveGroup(IList<int> ids, int dx, int dz)
+        {
+            if (!CanMoveGroup(ids, dx, dz)) { Notice = "整体无法移动到这里：有建筑越界或与未选建筑重叠。"; return false; }
+            foreach (int id in ids) { Building building = Find(id); building.X += dx; building.Z += dz; }
+            undo.Clear(); redo.Clear();
+            Notice = "已整体移动 " + ids.Count + " 座建筑。";
+            return true;
+        }
         public bool Upgrade(int id)
         {
             if (Battle != null) return false;

@@ -516,6 +516,20 @@ namespace Hearthhold.UnityClient
             PrepareHomeSmoke(); showBuildCatalog = true;
             session.Notice = "建造目录验收：价格、用途、解锁和数量上限集中展示。";
         }
+        private void PrepareLayoutEditorSmoke(bool tray)
+        {
+            PrepareHomeSmoke(); EnterLayoutEditor();
+            if (tray)
+            {
+                ClearLayoutToTray(); int before = layoutStaged.Count;
+                if (before > 0) { BeginStagedPlacement(layoutStaged[0].Id, false); PlaceStagedBuilding(2, 2); }
+                if (session.Village.Buildings.Count != 1 || layoutStaged.Count != before - 1)
+                    Debug.LogError("HEARTHHOLD_LAYOUT_PLACEMENT_SMOKE_FAILED: click placement did not transfer one building from tray to map.");
+                else Debug.Log("HEARTHHOLD_LAYOUT_PLACEMENT_SMOKE_READY: placed=1 staged=" + layoutStaged.Count);
+            }
+            else SelectAllLayoutBuildings();
+            Debug.Log("HEARTHHOLD_LAYOUT_EDITOR_SMOKE_READY: tray=" + tray + " placed=" + session.Village.Buildings.Count + " staged=" + layoutStaged.Count);
+        }
         private void PrepareWallRowSmoke()
         {
             selectedWallIds.Clear();

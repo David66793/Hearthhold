@@ -1,7 +1,7 @@
 {
   "name": "Hearthhold.Editor",
   "rootNamespace": "Hearthhold.Editor",
-  "references": ["Hearthhold.Runtime", "Hearthhold.Core", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"],
+  "references": ["Hearthhold.Runtime", "Hearthhold.Core", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime", "Unity.TextMeshPro"],
   "includePlatforms": ["Editor"],
   "autoReferenced": true
 }

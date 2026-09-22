@@ -51,6 +51,12 @@ internal static class CoreTests
         Check(s.CanMoveWallRow(wallIds, middleWall.Id, 6, 28), "Wall row previews a valid translated footprint");
         Check(s.MoveWallRow(wallIds, middleWall.Id, 6, 28) && row[0].Z == 28 && row[2].Z == 28, "Wall row moves atomically while retaining its shape");
         Check(!s.MoveWallRow(wallIds, middleWall.Id, 18, 16) && row[1].X == 6 && row[1].Z == 28, "Blocked wall-row move preserves every segment");
+        List<int> allBuildingIds = new List<int>(); foreach (Building building in s.Village.Buildings) allBuildingIds.Add(building.Id);
+        int keepX = s.Find(1).X, keepZ = s.Find(1).Z;
+        Check(s.CanMoveGroup(allBuildingIds, -3, 2), "Formation editor previews a valid whole-layout translation");
+        Check(s.MoveGroup(allBuildingIds, -3, 2) && s.Find(1).X == keepX - 3 && s.Find(1).Z == keepZ + 2, "Formation editor moves every selected building atomically");
+        int movedKeepX = s.Find(1).X, movedKeepZ = s.Find(1).Z;
+        Check(!s.MoveGroup(allBuildingIds, -20, 0) && s.Find(1).X == movedKeepX && s.Find(1).Z == movedKeepZ, "Invalid whole-layout move preserves every building position");
         SaveStore.Validate(s.Village);
         s.Village.Gold = 0;
         Check(!s.Build(BuildingKind.Mine, 6, 20), "Reject unaffordable construction");
