@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'check-architecture.ps1')
 $taskCompiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $taskCompiler -PathType Leaf)) {
     throw 'Windows .NET Framework 4.x compiler is required for the standalone core checks.'

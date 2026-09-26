@@ -8,6 +8,7 @@ namespace Hearthhold.Core
     public enum TroopKind { Vanguard, Ranger, Guardian, Sapper, SkyRider, Alchemist, Medic, Summoner }
     public enum SpellKind { Heal, Fury, Freeze, Breach }
     public enum HeroKind { EmberWarden }
+    public enum EquipmentKind { HearthShield, RiftHammer, MarchTorch, EmberChalice }
     public enum PetKind { CinderFox, Mossback }
 
     public sealed class BuildingSpec
@@ -117,6 +118,18 @@ namespace Hearthhold.Core
             new PetSpec("燧爪", "战宠 · 近战协攻", "忠诚的炉火猎兽。跟随英雄攻击同一目标；英雄倒下后会继续独立作战。", new TroopSpec("燧爪", "战宠 · 近战协攻", 950, 85, 1100, 175, 15, 1, 0, 0, 0), 3200),
             new PetSpec("苔背", "战宠 · 守护", "尚未开放的防护型战宠。", new TroopSpec("苔背", "战宠 · 守护", 1500, 45, 1100, 110, 20, 1, 0, 0, 0), 2800)
         };
+        public static readonly string[] EquipmentNames = { "守炉盾", "裂垒锤", "行军火炬", "余烬圣盏" };
+        public static readonly string[] EquipmentRoles = { "被动 · 抗伤", "被动 · 开墙", "技能 · 突进", "技能 · 续航" };
+        public static string EquipmentEffect(EquipmentKind kind, int level)
+        {
+            if (level <= 0) return "尚未制作";
+            if (kind == EquipmentKind.HearthShield) return "防御伤害减免 " + (15 + level * 5) + "%";
+            if (kind == EquipmentKind.RiftHammer) return "对城墙伤害 " + (1.5f + level * 0.5f).ToString("0.0") + " 倍";
+            if (kind == EquipmentKind.MarchTorch) return "号令半径 " + (5.5f + level * 0.5f).ToString("0.0") + " 格，持续 " + (8 + level) + " 秒";
+            return "号令额外治疗友军 " + (10 + level * 5) + "%最大生命";
+        }
+        public static int EquipmentGoldCost(int currentLevel) { return currentLevel <= 0 ? 100 : currentLevel == 1 ? 200 : 350; }
+        public static int EquipmentDustCost(int currentLevel) { return currentLevel <= 0 ? 100 : currentLevel == 1 ? 80 : 120; }
         public static readonly string[] FormationNames = { "新兵集结", "均衡远征", "重甲破阵", "远程压制", "王庭突击·75" };
         public static readonly int[][] FormationCounts = {
             new[] { 22, 23, 0, 0, 0, 0, 0, 0 },
@@ -148,14 +161,29 @@ namespace Hearthhold.Core
         public static int ResearchGold(int level) { return 180 * level; }
         public static int ResearchCrystal(int level) { return 120 * level; }
         public static readonly string[] SpellNames = { "疗愈之雨", "战吼", "霜封", "裂地" };
+        public static int SpellDurationTicks(SpellKind kind, int level)
+        {
+            int rank = Math.Max(1, Math.Min(3, level)) - 1;
+            if (kind == SpellKind.Heal) return (8 + rank) * TicksPerSecond;
+            if (kind == SpellKind.Fury) return (9 + rank) * TicksPerSecond;
+            if (kind == SpellKind.Freeze) return (7 + rank) * TicksPerSecond;
+            return 0;
+        }
+        public static int SpellRadius(SpellKind kind, int level)
+        {
+            if (kind == SpellKind.Heal) return 5000;
+            if (kind == SpellKind.Fury) return 4500;
+            if (kind == SpellKind.Freeze) return 4000;
+            return 3600 + (Math.Max(1, level) - 1) * 600;
+        }
         public static int SpellUnlockKeepLevel(SpellKind kind)
         { return kind == SpellKind.Heal ? 1 : kind == SpellKind.Breach ? 3 : 2; }
         public static string SpellEffect(SpellKind kind, int level)
         {
             if (level <= 0) return "尚未研究";
-            if (kind == SpellKind.Heal) return "恢复约" + (67 + (level - 1) * 10) + "%最大生命";
-            if (kind == SpellKind.Fury) return "强化持续" + (6 + (level - 1)) + "秒";
-            if (kind == SpellKind.Freeze) return "冻结持续" + (4 + (level - 1)) + "秒";
+            if (kind == SpellKind.Heal) return "持续" + SpellDurationTicks(kind, level) / TicksPerSecond + "秒，恢复约" + (72 + (level - 1) * 8) + "%最大生命";
+            if (kind == SpellKind.Fury) return "范围强化持续" + SpellDurationTicks(kind, level) / TicksPerSecond + "秒";
+            if (kind == SpellKind.Freeze) return "范围冻结持续" + SpellDurationTicks(kind, level) / TicksPerSecond + "秒";
             return "破墙半径" + (3.6f + (level - 1) * 0.6f).ToString("0.0") + "格";
         }
         public static string BuildingData(Building b)
@@ -268,9 +296,21 @@ namespace Hearthhold.Core
         { X = x; Z = z; EndX = endX; EndZ = endZ; Ticks = ticks; Kind = kind; }
     }
 
+    public sealed class SpellZone
+    {
+        public SpellKind Kind;
+        public int X, Z, Level, TicksLeft;
+        public SpellZone(SpellKind kind, int x, int z, int level)
+        { Kind = kind; X = x; Z = z; Level = level; TicksLeft = Rules.SpellDurationTicks(kind, level); }
+    }
+
     public sealed class VillageData
     {
-        public int Version = 2, Gold = 1600, Crystal = 700, NextId = 1, Wins;
+        public int Version = 3, Gold = 1600, Crystal = 700, NextId = 1, Wins;
+        public int CoreSigils, Stardust;
+        public bool HeroHallPermit;
+        public List<int> EquipmentLevels = new List<int>();
+        public List<int> HeroEquipmentSlots = new List<int>();
         public long LastIncomeUtcTicks;
         public List<Building> Buildings = new List<Building>();
         public List<int> CampaignStars = new List<int>();
@@ -295,6 +335,8 @@ namespace Hearthhold.Core
             copy.HeroLevels = new List<int>(HeroLevels);
             copy.PetLevels = new List<int>(PetLevels);
             copy.HeroPetAssignments = new List<int>(HeroPetAssignments);
+            copy.EquipmentLevels = new List<int>(EquipmentLevels);
+            copy.HeroEquipmentSlots = new List<int>(HeroEquipmentSlots);
             copy.TrainingQueue = new List<int>(TrainingQueue);
             return copy;
         }
@@ -312,7 +354,7 @@ namespace Hearthhold.Core
             v.Add(BuildingKind.Cannon, 15, 15);
             v.Add(BuildingKind.Watchtower, 23, 24);
             for (int x = 15; x <= 24; x++) v.Add(BuildingKind.Wall, x, 21);
-            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureHeroes(); v.EnsureArmy();
+            v.EnsureProgress(); v.EnsureTechnology(); v.EnsureHeroes(); v.EnsureEquipment(); v.EnsureArmy();
             return v;
         }
         public Building Add(BuildingKind kind, int x, int z)
@@ -413,6 +455,40 @@ namespace Hearthhold.Core
             if (HeroPetAssignments == null) HeroPetAssignments = new List<int>();
             while (HeroPetAssignments.Count < Rules.Heroes.Length) HeroPetAssignments.Add(-1);
         }
+        public void EnsureEquipment()
+        {
+            if (EquipmentLevels == null) EquipmentLevels = new List<int>();
+            if (HeroEquipmentSlots == null) HeroEquipmentSlots = new List<int>();
+            while (EquipmentLevels.Count < Rules.EquipmentNames.Length) EquipmentLevels.Add(0);
+            while (HeroEquipmentSlots.Count < Rules.Heroes.Length * 2) HeroEquipmentSlots.Add(-1);
+        }
+        public bool HasEquipped(HeroKind hero, EquipmentKind equipment)
+        {
+            EnsureEquipment(); int start = (int)hero * 2;
+            return start >= 0 && start + 1 < HeroEquipmentSlots.Count &&
+                (HeroEquipmentSlots[start] == (int)equipment || HeroEquipmentSlots[start + 1] == (int)equipment);
+        }
+        public void MigrateEquipment()
+        {
+            if (Version != 2) return;
+            EnsureProgress(); EnsureHeroes(); EnsureEquipment();
+            for (int i = 0; i < CampaignStars.Count; i++)
+            {
+                int stars = CampaignStars[i];
+                if ((i == 0 || i == 3 || i == 6) && stars > 0) CoreSigils = Math.Min(12, CoreSigils + 1);
+                if (stars >= 2) Stardust = Math.Min(1000, Stardust + 30);
+                if (stars >= 3) Stardust = Math.Min(1000, Stardust + 30);
+            }
+            if (HeroHallLevel > 0 || HeroLevels[0] > 0)
+            {
+                HeroHallPermit = true;
+                CoreSigils = Math.Max(0, CoreSigils - 1);
+                EquipmentLevels[0] = Math.Max(1, EquipmentLevels[0]);
+                EquipmentLevels[1] = Math.Max(1, EquipmentLevels[1]);
+                HeroEquipmentSlots[0] = 0; HeroEquipmentSlots[1] = 1;
+            }
+            Version = 3;
+        }
         public void MigrateLegacy()
         {
             if (Version != 1) return;
@@ -441,6 +517,14 @@ namespace Hearthhold.Core
             int oldStars = CampaignStars[mission], oldBest = CampaignBest[mission];
             CampaignStars[mission] = Math.Max(oldStars, Math.Max(0, Math.Min(3, stars)));
             CampaignBest[mission] = Math.Max(oldBest, Math.Max(0, Math.Min(100, destruction)));
+            if (Version >= 3)
+            {
+                int newStars = CampaignStars[mission];
+                if ((mission == 0 || mission == 3 || mission == 6) && oldStars == 0 && newStars > 0)
+                    CoreSigils = Math.Min(12, CoreSigils + 1);
+                if (oldStars < 2 && newStars >= 2) Stardust = Math.Min(1000, Stardust + 30);
+                if (oldStars < 3 && newStars >= 3) Stardust = Math.Min(1000, Stardust + 30);
+            }
             return CampaignStars[mission] != oldStars || CampaignBest[mission] != oldBest;
         }
         public bool HasClaimed(string achievementId) { return ClaimedAchievements != null && ClaimedAchievements.Contains(achievementId); }

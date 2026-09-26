@@ -216,8 +216,10 @@ namespace Hearthhold.UnityClient
         private void PresentBattleEffects()
         {
             if (session.Battle == null) return;
+            presentedEffects.RemoveWhere(effect => effect.Ticks <= 0);
             foreach (CombatEffect effect in session.Battle.Effects)
             {
+                if (effect.Ticks <= 0) continue;
                 if (!presentedEffects.Add(effect)) continue;
                 Vector3 start = new Vector3(effect.X / 1000f, 1.15f, effect.Z / 1000f);
                 Vector3 end = new Vector3(effect.EndX / 1000f, 1.15f, effect.EndZ / 1000f);
@@ -230,11 +232,7 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 1)
                 {
-                    AnimateBuildingAttack(effect.X, effect.Z, end);
-                    SpawnProjectile(start + Vector3.up * 0.65f, end, Ember, 0.28f, 1.35f);
-                    SpawnBurst(start + Vector3.up * 0.65f, new Color32(255, 204, 104, 255), 5, 1.25f, 0.28f);
-                    SpawnBurst(end, Ember, 8, 1.8f, 0.55f);
-                    FlashUnit(effect.EndX, effect.EndZ, Danger);
+                    PresentDefenseAttackEffect(effect, start, end);
                 }
                 else if (effect.Kind == 2)
                 {
@@ -245,15 +243,7 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 3)
                 {
-                    Vector3 center = new Vector3(effect.X / 1000f, 0.12f, effect.Z / 1000f);
-                    SpawnPulse(center, Mint, 0.5f, 9.6f, 0.85f);
-                    SpawnPulse(center + Vector3.up * 0.04f, new Color32(184, 255, 219, 255), 0.25f, 6.8f, 0.62f);
-                    SpawnMotes(center, Mint, 14);
-                    foreach (Unit unit in session.Battle.Units)
-                    {
-                        long dx = unit.X - effect.X, dz = unit.Z - effect.Z;
-                        if (unit.Health > 0 && dx * dx + dz * dz <= 25000000L) Flash(unitViews.ContainsKey(unit.Id) ? unitViews[unit.Id] : null, Mint);
-                    }
+                    PresentHealEffect(effect);
                 }
                 else if (effect.Kind == 4)
                 {
@@ -277,18 +267,15 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 7)
                 {
-                    Vector3 center = new Vector3(effect.X / 1000f, 0.13f, effect.Z / 1000f);
-                    SpawnPulse(center, Ember, 0.4f, 8.5f, 0.75f); SpawnMotes(center, Gold, 18);
+                    PresentFuryEffect(effect);
                 }
                 else if (effect.Kind == 8)
                 {
-                    Vector3 center = new Vector3(effect.X / 1000f, 0.13f, effect.Z / 1000f);
-                    Color ice = new Color32(122, 218, 255, 255); SpawnPulse(center, ice, 0.4f, 7.8f, 0.8f); SpawnMotes(center, ice, 16);
+                    PresentFreezeEffect(effect);
                 }
                 else if (effect.Kind == 9)
                 {
-                    Vector3 center = new Vector3(effect.X / 1000f, 0.16f, effect.Z / 1000f);
-                    SpawnPulse(center, new Color32(219, 159, 88, 255), 0.5f, 7.2f, 0.7f); SpawnBurst(center, Ember, 16, 2.3f, 0.8f);
+                    PresentBreachEffect(effect);
                 }
                 else if (effect.Kind == 10)
                 {
@@ -300,7 +287,72 @@ namespace Hearthhold.UnityClient
                     AnimateUnitAttack(effect.X, effect.Z, end);
                     SpawnPulse(end, Mint, 0.2f, 1.5f, 0.35f); SpawnMotes(end, Mint, 6); FlashUnit(effect.EndX, effect.EndZ, Mint);
                 }
+                else if (effect.Kind == 12)
+                {
+                    SpawnHeroCommand(effect);
+                }
             }
+        }
+
+        private void SpawnHeroCommand(CombatEffect effect)
+        {
+            Unit hero = null;
+            foreach (Unit unit in session.Battle.Units)
+                if (unit.IsHero && unit.Health > 0 && unit.X == effect.X && unit.Z == effect.Z) { hero = unit; break; }
+            if (hero == null || !unitViews.ContainsKey(hero.Id)) return;
+            Transform heroRoot = unitViews[hero.Id].transform;
+            GameObject aura = new GameObject("Hero command aura");
+            aura.transform.SetParent(heroRoot, false);
+            aura.transform.localPosition = Vector3.up * 0.12f;
+            Transform outer = Ring("Ember command boundary", Ember, aura.transform).transform;
+            Transform inner = Ring("Bronze command seal", Gold, aura.transform).transform;
+            inner.localPosition = Vector3.up * 0.06f;
+            Material auraMaterial = Resources.Load<Material>("SpellAura");
+            if (auraMaterial != null)
+            {
+                TintSpellRenderer(outer.GetComponent<Renderer>(), auraMaterial, Ember, 0.34f, 0f);
+                TintSpellRenderer(inner.GetComponent<Renderer>(), auraMaterial, Gold, 0.24f, 0f);
+            }
+            Transform[] embers = new Transform[8];
+            for (int i = 0; i < embers.Length; i++)
+                embers[i] = Piece("Orbiting command ember", PrimitiveType.Sphere, Vector3.zero,
+                    Vector3.one * (i % 2 == 0 ? 0.16f : 0.11f), i % 2 == 0 ? Ember : Gold, aura.transform).transform;
+            aura.AddComponent<HeroCommandVisual>().Configure(effect, outer, inner, embers);
+            Vector3 center = heroRoot.position + Vector3.up * 0.17f;
+            SpawnSoftPulse(center, Gold, 0.6f, 8f, 0.58f, 0.34f);
+            SpawnSoftPulse(center + Vector3.up * 0.08f, Ember, 0.35f, 4.8f, 0.42f, 0.25f);
+            SpawnBurst(center + Vector3.up * 1.15f, Ember, 12, 2.1f, 0.65f);
+            foreach (Unit ally in session.Battle.Units)
+            {
+                if (ally.Id == hero.Id || ally.Health <= 0 || ally.FuryTicks <= 0) continue;
+                long dx = ally.X - hero.X, dz = ally.Z - hero.Z;
+                if (dx * dx + dz * dz > 65000000L) continue;
+                SpawnPulse(new Vector3(ally.X / 1000f, 0.14f, ally.Z / 1000f), Gold, 0.2f, 1.7f, 0.4f);
+            }
+            Debug.Log("HEARTHHOLD_HERO_COMMAND_VISUAL_READY: following aura and allied activation pulses.");
+        }
+
+        private void MarkFrozenDefense(Building building, GameObject view)
+        {
+            if (view.transform.Find("Frozen defense seal") != null) return;
+            Color ice = new Color32(122, 218, 255, 255);
+            GameObject seal = new GameObject("Frozen defense seal");
+            seal.transform.SetParent(view.transform, false);
+            seal.transform.localPosition = new Vector3(building.Spec.Size * 0.5f, 0.14f, building.Spec.Size * 0.5f);
+            Transform ring = Ring("Frozen defense boundary", ice, seal.transform).transform;
+            Material auraMaterial = Resources.Load<Material>("SpellAura");
+            if (auraMaterial != null) TintSpellRenderer(ring.GetComponent<Renderer>(), auraMaterial, ice, 0.48f, 0f);
+            Transform[] crystals = new Transform[4];
+            for (int i = 0; i < crystals.Length; i++)
+            {
+                float angle = (i + 0.5f) * Mathf.PI * 0.5f;
+                crystals[i] = Piece("Frozen defense crystal", PrimitiveType.Cube,
+                    new Vector3(Mathf.Cos(angle) * (building.Spec.Size * 0.43f), 0.28f,
+                        Mathf.Sin(angle) * (building.Spec.Size * 0.43f)),
+                    new Vector3(0.15f, 0.48f, 0.15f), ice, seal.transform).transform;
+                crystals[i].localRotation = Quaternion.Euler(0, 45f, 16f);
+            }
+            seal.AddComponent<FrozenDefenseVisual>().Configure(building, ring, crystals, building.Spec.Size + 0.8f);
         }
 
         private void SpawnProjectile(Vector3 start, Vector3 end, Color color, float duration, float arc)
@@ -327,6 +379,88 @@ namespace Hearthhold.UnityClient
             GameObject pulse = Ring("Impact ring", color, effectsRoot);
             pulse.transform.position = position;
             pulse.AddComponent<TimedWorldEffect>().Pulse(startScale, endScale, duration);
+        }
+
+        private void SpawnSoftPulse(Vector3 position, Color color, float startScale, float endScale, float duration, float alpha)
+        {
+            GameObject pulse = Ring("Soft command wave", color, effectsRoot);
+            pulse.transform.position = position;
+            Material auraMaterial = Resources.Load<Material>("SpellAura");
+            if (auraMaterial != null) TintSpellRenderer(pulse.GetComponent<Renderer>(), auraMaterial, color, alpha, 0f);
+            pulse.AddComponent<TimedWorldEffect>().Pulse(startScale, endScale, duration);
+        }
+
+        private void SpawnSpellField(Vector3 center, Color primary, Color secondary, float radius, CombatEffect effect, int style)
+        {
+            GameObject field = new GameObject("Sustained spell field");
+            field.transform.SetParent(effectsRoot, false); field.transform.position = center;
+            Material auraMaterial = Resources.Load<Material>("SpellAura");
+            GameObject wash = Piece("Soft spell light", PrimitiveType.Plane, Vector3.down * 0.085f,
+                new Vector3(radius / 5f, 1f, radius / 5f), primary, field.transform);
+            Transform outer = Ring("Spell boundary", primary, field.transform).transform;
+            Transform inner = Ring("Spell resonance", secondary, field.transform).transform;
+            outer.localPosition = Vector3.zero; inner.localPosition = Vector3.up * 0.045f;
+            if (auraMaterial != null)
+            {
+                TintSpellRenderer(wash.GetComponent<Renderer>(), auraMaterial, primary, 0.17f, 1f);
+                TintSpellRenderer(outer.GetComponent<Renderer>(), auraMaterial, primary, 0.32f, 0f);
+                TintSpellRenderer(inner.GetComponent<Renderer>(), auraMaterial, secondary, 0.17f, 0f);
+            }
+            Transform[] motes = new Transform[12];
+            for (int i = 0; i < motes.Length; i++)
+            {
+                Vector3 size = style == 2 ? new Vector3(0.16f, 0.52f, 0.16f) : style == 1 ? new Vector3(0.2f, 0.38f, 0.2f) : new Vector3(0.16f, 0.16f, 0.16f);
+                motes[i] = Piece(style == 2 ? "Frost crystal" : style == 1 ? "Ember rune" : "Rising 3D healing mote", style == 2 ? PrimitiveType.Cube : PrimitiveType.Sphere, Vector3.zero, size, i % 3 == 0 ? secondary : primary, field.transform).transform;
+            }
+            if (style == 0)
+            {
+                Piece("Healing fountain lower core", PrimitiveType.Sphere, new Vector3(0, 0.30f, 0), new Vector3(0.70f, 0.26f, 0.70f), primary, field.transform);
+                Piece("Healing fountain upper core", PrimitiveType.Sphere, new Vector3(0, 1.16f, 0), new Vector3(0.30f, 0.87f, 0.30f), secondary, field.transform);
+                for (int i = 0; i < 5; i++)
+                {
+                    float angle = i * Mathf.PI * 2f / 5f;
+                    GameObject petal = Piece("Raised healing petal", PrimitiveType.Capsule,
+                        new Vector3(Mathf.Cos(angle) * 0.73f, 0.45f, Mathf.Sin(angle) * 0.73f),
+                        new Vector3(0.22f, 0.48f, 0.22f), i % 2 == 0 ? secondary : primary, field.transform);
+                    petal.transform.localRotation = Quaternion.Euler(Mathf.Sin(angle) * 38f, 0, -Mathf.Cos(angle) * 38f);
+                }
+                Debug.Log("HEARTHHOLD_ART_PROTOTYPE_HEAL_3D: volumetric fountain and twelve orbiting motes");
+            }
+            else if (style == 1)
+            {
+                Piece("Fury ember heart", PrimitiveType.Sphere, new Vector3(0, 0.62f, 0), new Vector3(0.47f, 0.78f, 0.47f), secondary, field.transform);
+                for (int i = 0; i < 4; i++)
+                {
+                    float angle = i * Mathf.PI * 0.5f;
+                    GameObject flame = Piece("Rising fury flame", PrimitiveType.Capsule,
+                        new Vector3(Mathf.Cos(angle) * radius * 0.38f, 0.66f, Mathf.Sin(angle) * radius * 0.38f),
+                        new Vector3(0.27f, 0.83f + i % 2 * 0.20f, 0.27f), primary, field.transform);
+                    flame.transform.localRotation = Quaternion.Euler(Mathf.Sin(angle) * -16f, 0, Mathf.Cos(angle) * 16f);
+                }
+            }
+            else
+            {
+                Piece("Frost heart", PrimitiveType.Cube, new Vector3(0, 0.81f, 0), new Vector3(0.47f, 1.32f, 0.47f), secondary, field.transform)
+                    .transform.localRotation = Quaternion.Euler(0, 45, 0);
+                for (int i = 0; i < 6; i++)
+                {
+                    float angle = i * Mathf.PI * 2f / 6f;
+                    GameObject crystal = Piece("Frost spire", PrimitiveType.Cube,
+                        new Vector3(Mathf.Cos(angle) * radius * 0.57f, 0.63f, Mathf.Sin(angle) * radius * 0.57f),
+                        new Vector3(0.27f, 1.05f + i % 2 * 0.36f, 0.27f), i % 2 == 0 ? primary : secondary, field.transform);
+                    crystal.transform.localRotation = Quaternion.Euler(0, 45, i % 2 == 0 ? 12 : -16);
+                }
+            }
+            field.AddComponent<SpellFieldVisual>().Configure(wash.transform, outer, inner, motes, radius, effect, style);
+        }
+
+        private static void TintSpellRenderer(Renderer renderer, Material material, Color tint, float alpha, float softness)
+        {
+            renderer.sharedMaterial = material;
+            MaterialPropertyBlock properties = new MaterialPropertyBlock();
+            properties.SetColor("_Color", new Color(tint.r, tint.g, tint.b, alpha));
+            properties.SetFloat("_Softness", softness);
+            renderer.SetPropertyBlock(properties);
         }
 
         private void SpawnDestruction(Vector3 position)
@@ -482,6 +616,115 @@ namespace Hearthhold.UnityClient
             session.Notice = "0.9 战斗验收：八兵种、六种防御与四类法术。";
         }
 
+        private void PrepareSpellFieldSmoke()
+        {
+            PrepareBattleSmoke();
+            if (session.Battle == null || session.Battle.Finished) return;
+            session.Battle.SpellCharges = session.Battle.FuryCharges = session.Battle.FreezeCharges = 1;
+            if (!session.Battle.CastHeal(10500, 26000) || !session.Battle.CastFury(20500, 24000)
+                || !session.Battle.CastFreeze(30000, 15000))
+                Debug.LogError("HEARTHHOLD_SPELL_FIELDS_FAILED: could not cast all three sustained fields.");
+        }
+
+        private int feedbackHeroId = -1, feedbackPetId = -1, feedbackFrozenDefenseId = -1;
+        private void PrepareCombatFeedbackSmoke()
+        {
+            if (session.Village.Count(BuildingKind.HeroHall) == 0) session.Village.Add(BuildingKind.HeroHall, 5, 5);
+            if (session.Village.Count(BuildingKind.PetLodge) == 0) session.Village.Add(BuildingKind.PetLodge, 9, 5);
+            session.Village.EnsureHeroes();
+            session.Village.HeroLevels[0] = 2; session.Village.PetLevels[0] = 2; session.Village.HeroPetAssignments[0] = 0;
+            session.Village.EnsureTechnology(); session.Village.SpellLevels[(int)SpellKind.Freeze] = 1;
+            session.BeginBattle();
+            if (session.Battle == null || !session.Battle.DeployHeroNearest(HeroKind.EmberWarden, 9500, 30000)
+                || !session.Battle.CastHeroSkill(HeroKind.EmberWarden))
+            { Debug.LogError("HEARTHHOLD_COMBAT_FEEDBACK_FAILED: hero skill could not be activated."); return; }
+            foreach (Unit unit in session.Battle.Units)
+            {
+                if (unit.IsHero) feedbackHeroId = unit.Id;
+                if (unit.IsPet) feedbackPetId = unit.Id;
+            }
+            foreach (Building building in session.Battle.Buildings)
+                if (building.Spec.Damage > 0) { feedbackFrozenDefenseId = building.Id; session.Battle.CastFreeze(building.CenterX, building.CenterZ); break; }
+            showBrief = false; briefSeen = true;
+            RebuildBuildings(); SyncBattle();
+            Unit pet = session.Battle.Units.Find(delegate(Unit unit) { return unit.Id == feedbackPetId; });
+            if (pet != null) { FlashUnit(pet.X, pet.Z, Danger); FlashUnit(pet.X, pet.Z, Danger); }
+            focus = new Vector3(13, 0, 27); worldCamera.orthographicSize = 11.5f; MoveCamera();
+        }
+
+        private bool VerifyCombatFeedbackSmoke()
+        {
+            GameObject hero, pet, defense;
+            bool ready = unitViews.TryGetValue(feedbackHeroId, out hero) && hero != null
+                && hero.transform.Find("Hero command aura") != null
+                && unitViews.TryGetValue(feedbackPetId, out pet) && pet != null
+                && pet.GetComponent<ModelHitFlash>() != null && pet.GetComponent<ModelHitFlash>().AppearanceRestored()
+                && buildingViews.TryGetValue(feedbackFrozenDefenseId, out defense) && defense != null
+                && defense.transform.Find("Frozen defense seal") != null;
+            if (ready) Debug.Log("HEARTHHOLD_COMBAT_FEEDBACK_READY: pet tint restored, hero aura active, frozen defense marked.");
+            else Debug.LogError("HEARTHHOLD_COMBAT_FEEDBACK_FAILED: a combat visual is absent or pet tint was not restored.");
+            return ready;
+        }
+
+        private GameObject artProofVanguard, artProofPet, artProofField;
+        private void PrepareArtProofSmoke(bool rotated)
+        {
+            PrepareHomeSmoke();
+            Building keep = session.Village.Buildings.Find(delegate(Building b) { return b.Kind == BuildingKind.Keep; });
+            if (keep == null) return;
+            // Isolate the four specimens for honest visual comparison; gameplay villages remain untouched.
+            session.Village.Buildings.RemoveAll(delegate(Building b) { return b.Kind != BuildingKind.Keep; });
+            keep.Level = 3; keep.Health = keep.MaxHealth; RebuildBuildings();
+            artProofVanguard = modelViews.Troop(new Unit { Kind = TroopKind.Vanguard }, unitsRoot, 2);
+            artProofVanguard.transform.position = rotated ? new Vector3(26f, 0, 22f) : new Vector3(11f, 0, 21f);
+            artProofVanguard.transform.rotation = Quaternion.Euler(0, -28, 0);
+            artProofPet = modelViews.Troop(new Unit { IsPet = true, PetKind = PetKind.CinderFox, Kind = TroopKind.Sapper }, unitsRoot, 2);
+            artProofPet.transform.position = rotated ? new Vector3(12f, 0, 14f) : new Vector3(17f, 0, 18f);
+            artProofPet.transform.rotation = Quaternion.Euler(0, -25, 0);
+            Vector3 spellCenter = rotated ? new Vector3(15f, 0.12f, 22f) : new Vector3(23.5f, 0.12f, 12.5f);
+            CombatEffect source = new CombatEffect(Mathf.RoundToInt(spellCenter.x * 1000f), Mathf.RoundToInt(spellCenter.z * 1000f), Mathf.RoundToInt(spellCenter.x * 1000f), Mathf.RoundToInt(spellCenter.z * 1000f), 300, 3);
+            SpawnSpellField(spellCenter, Mint, new Color32(188, 255, 213, 255), 2.8f, source, 0);
+            artProofField = effectsRoot.GetChild(effectsRoot.childCount - 1).gameObject;
+            artProofField.AddComponent<ArtProofEffectClock>().Source = source;
+            focus = new Vector3(19, 0, 17f); worldCamera.orthographicSize = 9.8f;
+            cameraYaw = rotated ? 135 : 45; worldCamera.transform.rotation = Quaternion.Euler(45, cameraYaw, 0); MoveCamera();
+            selected = -1; showBrief = false; briefSeen = true;
+        }
+        private bool VerifyArtProofSmoke()
+        {
+            bool ready = artProofVanguard != null && artProofPet != null && artProofField != null
+                && artProofVanguard.GetComponentInChildren<SkinnedMeshRenderer>() != null
+                && artProofPet.GetComponentsInChildren<MeshFilter>().Length >= 15
+                && artProofPet.GetComponent<CinderFoxArtAnimator>() != null
+                && artProofPet.transform.Find("3D model/Fox tail joint/Sculpted tapering fire tail") != null
+                && artProofField.transform.Find("Healing fountain upper core") != null
+                && artProofField.transform.Find("Raised healing petal") != null
+                && sceneryRoot.Find("Painted meadow surface") != null
+                && artProofVanguard.GetComponentInChildren<FixedIsometricBillboard>() == null
+                && artProofPet.GetComponentInChildren<FixedIsometricBillboard>() == null;
+            if (ready) Debug.Log("HEARTHHOLD_ART_PROOF_READY: real 3D keep, rigged troop, articulated pet, volumetric heal; yaw=" + cameraYaw);
+            else Debug.LogError("HEARTHHOLD_ART_PROOF_FAILED: 3D specimen incomplete");
+            return ready;
+        }
+
+        private bool VerifySpellFieldSmoke()
+        {
+            int fields = 0, distinctCores = 0;
+            foreach (Transform child in effectsRoot)
+            {
+                if (child.name != "Sustained spell field" || !child.gameObject.activeInHierarchy) continue;
+                fields++;
+                if (child.Find("Healing fountain upper core") != null || child.Find("Fury ember heart") != null || child.Find("Frost heart") != null) distinctCores++;
+            }
+            if (session.Battle == null || session.Battle.SpellZones.Count != 3 || fields != 3 || distinctCores != 3)
+            {
+                Debug.LogError("HEARTHHOLD_SPELL_FIELDS_FAILED: zones=" + (session.Battle == null ? -1 : session.Battle.SpellZones.Count) + " visuals=" + fields + " distinctCores=" + distinctCores);
+                return false;
+            }
+            Debug.Log("HEARTHHOLD_SPELL_FIELDS_READY: three sustained rule zones have distinct living world visuals.");
+            return true;
+        }
+
         private void PrepareDeploySmoke()
         {
             session.MissionIndex = 0;
@@ -527,7 +770,7 @@ namespace Hearthhold.UnityClient
                     Debug.LogError("HEARTHHOLD_LAYOUT_PLACEMENT_SMOKE_FAILED: click placement did not transfer one building from tray to map.");
                 else Debug.Log("HEARTHHOLD_LAYOUT_PLACEMENT_SMOKE_READY: placed=1 staged=" + layoutStaged.Count);
             }
-            else SelectAllLayoutBuildings();
+            else { SelectAllLayoutBuildings(); if (smokeLayoutPointer) VerifyLayoutPointerSmoke(); }
             Debug.Log("HEARTHHOLD_LAYOUT_EDITOR_SMOKE_READY: tray=" + tray + " placed=" + session.Village.Buildings.Count + " staged=" + layoutStaged.Count);
         }
         private void PrepareWallRowSmoke()
@@ -564,6 +807,13 @@ namespace Hearthhold.UnityClient
             hall.Level = lodge.Level = 2; hall.Health = hall.MaxHealth; lodge.Health = lodge.MaxHealth;
             session.Village.EnsureHeroes(); session.Village.HeroLevels[0] = 1; session.Village.PetLevels[0] = 1;
             session.Village.HeroPetAssignments[0] = 0; session.Village.Gold = session.Village.Capacity; session.Village.Crystal = session.Village.Capacity;
+            if (smokeEquipment)
+            {
+                session.Village.EnsureEquipment(); session.Village.Stardust = 240; session.Village.CoreSigils = 1; session.Village.HeroHallPermit = true;
+                session.Village.EquipmentLevels[0] = 1; session.Village.EquipmentLevels[1] = 1; session.Village.EquipmentLevels[2] = 1;
+                session.Village.HeroEquipmentSlots[0] = 0; session.Village.HeroEquipmentSlots[1] = 2;
+                heroEquipmentTab = true; selectedEquipmentKind = 2;
+            }
             RebuildBuildings(); rosterSelection = showPet ? 1 : 0; showHeroes = true;
             session.Notice = "英雄殿堂验收：动态名册、实时动作、数值详情、灵契与升级入口。";
             Debug.Log("HEARTHHOLD_HERO_HALL_SMOKE_READY: hall=2 lodge=2 selected=" + (showPet ? "pet" : "hero"));
@@ -615,9 +865,112 @@ namespace Hearthhold.UnityClient
         }
     }
 
+    internal sealed class FrozenDefenseVisual : MonoBehaviour
+    {
+        private Building building;
+        private Transform ring;
+        private Transform[] crystals;
+        private float diameter, elapsed;
+
+        public void Configure(Building target, Transform boundary, Transform[] iceCrystals, float ringDiameter)
+        { building = target; ring = boundary; crystals = iceCrystals; diameter = ringDiameter; }
+
+        private void Update()
+        {
+            if (building == null || building.Health <= 0 || building.FrozenTicks <= 0) { Destroy(gameObject); return; }
+            elapsed += Time.deltaTime;
+            ring.localScale = Vector3.one * diameter * (1f + Mathf.Sin(elapsed * 2.8f) * 0.035f);
+            ring.Rotate(0, -Time.deltaTime * 13f, 0);
+            for (int i = 0; i < crystals.Length; i++)
+                crystals[i].localPosition = new Vector3(crystals[i].localPosition.x,
+                    0.28f + Mathf.Sin(elapsed * 2f + i * 1.3f) * 0.08f, crystals[i].localPosition.z);
+        }
+    }
+
+    internal sealed class HeroCommandVisual : MonoBehaviour
+    {
+        private CombatEffect source;
+        private Transform outer, inner;
+        private Transform[] embers;
+        private int initialTicks;
+
+        public void Configure(CombatEffect effect, Transform boundary, Transform seal, Transform[] orbitingEmbers)
+        { source = effect; initialTicks = effect.Ticks; outer = boundary; inner = seal; embers = orbitingEmbers; }
+
+        private void Update()
+        {
+            if (source == null || source.Ticks <= 0) { Destroy(gameObject); return; }
+            float elapsed = (initialTicks - source.Ticks) / (float)Rules.TicksPerSecond;
+            float presence = Mathf.Clamp01(elapsed / 0.22f) * Mathf.Clamp01(source.Ticks / (Rules.TicksPerSecond * 0.5f));
+            float breath = 1f + Mathf.Sin(elapsed * 4.2f) * 0.035f;
+            outer.localScale = Vector3.one * (5.5f * breath * presence);
+            inner.localScale = Vector3.one * (3.1f * (2f - breath) * presence);
+            outer.Rotate(0, Time.deltaTime * 20f, 0);
+            inner.Rotate(0, -Time.deltaTime * 34f, 0);
+            for (int i = 0; i < embers.Length; i++)
+            {
+                float angle = i * Mathf.PI * 2f / embers.Length + elapsed * 1.1f;
+                float radius = 1.5f + i % 2 * 0.25f;
+                embers[i].localPosition = new Vector3(Mathf.Cos(angle) * radius,
+                    0.27f + i % 3 * 0.16f + Mathf.Sin(elapsed * 4f + i) * 0.11f, Mathf.Sin(angle) * radius);
+                embers[i].localScale = Vector3.one * (i % 2 == 0 ? 0.16f : 0.11f) * presence;
+            }
+        }
+    }
+
+    internal sealed class SpellFieldVisual : MonoBehaviour
+    {
+        private Transform wash, outer, inner;
+        private Transform[] motes;
+        private Vector3[] moteScales;
+        private float radius, elapsed;
+        private int initialTicks;
+        private CombatEffect source;
+        private int style;
+
+        public void Configure(Transform groundWash, Transform boundary, Transform resonance, Transform[] particles, float fieldRadius, CombatEffect effect, int fieldStyle)
+        {
+            wash = groundWash; outer = boundary; inner = resonance; motes = particles; radius = fieldRadius; source = effect; initialTicks = effect.Ticks; style = fieldStyle;
+            moteScales = new Vector3[particles.Length];
+            for (int i = 0; i < particles.Length; i++) moteScales[i] = particles[i].localScale;
+        }
+
+        private void Update()
+        {
+            if (source == null || source.Ticks <= 0) { Destroy(gameObject); return; }
+            elapsed = (initialTicks - source.Ticks) / (float)Rules.TicksPerSecond;
+            float reveal = Mathf.Clamp01(elapsed / 0.28f);
+            float retreat = Mathf.Clamp01(source.Ticks / (Rules.TicksPerSecond * 0.45f));
+            float presence = reveal * retreat;
+            float beat = 1f + Mathf.Sin(elapsed * (style == 2 ? 2.8f : 4f)) * 0.025f;
+            wash.localScale = new Vector3(radius / 5f * beat * presence, 1f, radius / 5f * beat * presence);
+            outer.localScale = Vector3.one * (radius * 2f * beat * presence);
+            inner.localScale = Vector3.one * (radius * 1.46f * (2f - beat) * presence);
+            outer.Rotate(0, Time.deltaTime * (style == 2 ? -12f : 18f), 0);
+            inner.Rotate(0, Time.deltaTime * (style == 1 ? -30f : 24f), 0);
+            for (int i = 0; i < motes.Length; i++)
+            {
+                float angle = i * Mathf.PI * 2f / motes.Length + elapsed * (style == 1 ? 0.28f : -0.17f);
+                float distance = radius * (style == 0 ? 0.20f + i % 4 * 0.085f : 0.72f + i % 3 * 0.085f);
+                float lift = style == 0 ? 0.33f + i % 4 * 0.28f + Mathf.Sin(elapsed * 3.4f + i * 0.8f) * 0.13f
+                    : style == 1 ? 0.35f + Mathf.Sin(elapsed * 5f + i * 0.7f) * 0.18f
+                    : 0.34f + Mathf.Sin(elapsed * 1.5f + i) * 0.08f;
+                motes[i].localPosition = new Vector3(Mathf.Cos(angle) * distance, lift, Mathf.Sin(angle) * distance);
+                motes[i].localScale = moteScales[i] * presence;
+                motes[i].Rotate(0, Time.deltaTime * (style == 2 ? 45f : 90f), 0);
+            }
+        }
+    }
+
+    internal sealed class ArtProofEffectClock : MonoBehaviour
+    {
+        public CombatEffect Source;
+        private void Update() { if (Source != null && Source.Ticks > 0) Source.Ticks--; }
+    }
+
     internal sealed class TimedWorldEffect : MonoBehaviour
     {
-        private enum EffectMode { Projectile, Pulse, Debris, Mote }
+        private enum EffectMode { Projectile, Pulse, Debris, Mote, Hold }
         private EffectMode mode;
         private Vector3 start, end, velocity;
         private float elapsed, duration, arc, startScale, endScale;
@@ -630,6 +983,8 @@ namespace Hearthhold.UnityClient
         { mode = EffectMode.Debris; velocity = initialVelocity; duration = seconds; }
         public void Mote(Vector3 initialVelocity, float seconds)
         { mode = EffectMode.Mote; velocity = initialVelocity; duration = seconds; }
+        public void Hold(float seconds)
+        { mode = EffectMode.Hold; duration = seconds; }
 
         private void Update()
         {
@@ -649,7 +1004,7 @@ namespace Hearthhold.UnityClient
                 transform.position += velocity * Time.deltaTime;
                 transform.Rotate(180 * Time.deltaTime, 260 * Time.deltaTime, 110 * Time.deltaTime);
             }
-            else
+            else if (mode == EffectMode.Mote)
             {
                 transform.position += velocity * Time.deltaTime;
                 transform.Rotate(0, 150 * Time.deltaTime, 0);
@@ -663,39 +1018,73 @@ namespace Hearthhold.UnityClient
     {
         private Renderer[] targets;
         private MaterialPropertyBlock properties;
+        private MaterialPropertyBlock[] originalProperties;
+        private Color[] originalColors;
         private Color color;
         private float remaining;
-        public void Trigger(Color flashColor) { color = flashColor; remaining = 0.2f; }
+        public void Trigger(Color flashColor)
+        {
+            if (targets == null) CaptureOriginalAppearance();
+            color = flashColor; remaining = 0.2f;
+            Apply(1f);
+        }
+        private void CaptureOriginalAppearance()
+        {
+            List<Renderer> visible = new List<Renderer>();
+            foreach (Renderer candidate in GetComponentsInChildren<Renderer>())
+                if (candidate.gameObject.name != "Ground contact shadow") visible.Add(candidate);
+            targets = visible.ToArray();
+            originalProperties = new MaterialPropertyBlock[targets.Length];
+            originalColors = new Color[targets.Length];
+            for (int i = 0; i < targets.Length; i++)
+            {
+                originalProperties[i] = new MaterialPropertyBlock();
+                targets[i].GetPropertyBlock(originalProperties[i]);
+                Material material = targets[i].sharedMaterial;
+                Color baseColor = material != null && material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor")
+                    : material != null && material.HasProperty("_Color") ? material.GetColor("_Color") : Color.white;
+                Color overrideColor = originalProperties[i].GetColor("_BaseColor");
+                originalColors[i] = overrideColor.a > 0.001f ? overrideColor : baseColor;
+            }
+        }
         private void Update()
         {
             if (remaining <= 0) return;
-            if (targets == null)
-            {
-                List<Renderer> visible = new List<Renderer>();
-                foreach (Renderer candidate in GetComponentsInChildren<Renderer>())
-                    if (candidate.gameObject.name != "Ground contact shadow") visible.Add(candidate);
-                targets = visible.ToArray();
-            }
-            if (targets.Length == 0) return;
-            if (properties == null) properties = new MaterialPropertyBlock();
             remaining = Mathf.Max(0, remaining - Time.deltaTime);
-            float strength = Mathf.Sin(remaining / 0.2f * Mathf.PI);
-            foreach (Renderer target in targets)
-            {
-                target.GetPropertyBlock(properties);
-                properties.SetColor("_BaseColor", Color.Lerp(Color.white, color, strength * 0.8f));
-                target.SetPropertyBlock(properties);
-            }
+            if (remaining <= 0) { Restore(); return; }
+            Apply(remaining / 0.2f);
         }
-        private void OnDisable()
+        private void Apply(float strength)
         {
             if (targets == null) return;
             if (properties == null) properties = new MaterialPropertyBlock();
-            foreach (Renderer target in targets)
+            for (int i = 0; i < targets.Length; i++)
             {
-                target.GetPropertyBlock(properties); properties.SetColor("_BaseColor", Color.white); target.SetPropertyBlock(properties);
+                Renderer target = targets[i];
+                if (target == null) continue;
+                target.GetPropertyBlock(properties);
+                properties.SetColor("_BaseColor", Color.Lerp(originalColors[i], color, strength * 0.65f));
+                target.SetPropertyBlock(properties);
             }
+        }
+        private void Restore()
+        {
+            if (targets == null) return;
+            for (int i = 0; i < targets.Length; i++) if (targets[i] != null) targets[i].SetPropertyBlock(originalProperties[i]);
             remaining = 0;
         }
+        public bool AppearanceRestored()
+        {
+            if (remaining > 0 || targets == null || targets.Length == 0) return false;
+            MaterialPropertyBlock current = new MaterialPropertyBlock();
+            for (int i = 0; i < targets.Length; i++)
+            {
+                if (targets[i] == null) continue;
+                targets[i].GetPropertyBlock(current);
+                if (current.GetColor("_BaseColor") != originalProperties[i].GetColor("_BaseColor")) return false;
+            }
+            return true;
+        }
+        private void OnDisable() { Restore(); }
     }
 }

@@ -18,7 +18,7 @@ namespace Hearthhold.UnityClient
         private readonly List<int> selectedWallIds = new List<int>();
         private readonly Dictionary<Color, Material> materials = new Dictionary<Color, Material>();
         private string savePath, fatalError, smokeCapturePath;
-        private bool smokeBattle, smokeCampaign, smokeTraining, smokeDeploy, smokeResearch, smokeProgression, smokeBuildCatalog, smokeWallRow, smokeWallAxes, smokeHeroes, smokePets, smokeLayoutEditor, smokeLayoutTray, smokeRotated, smokeDetail, smokeArmyDetail;
+        private bool smokeBattle, smokeCombatFeedback, smokeSpellFields, smokeArtProof, smokeArtProofRotated, smokeCampaign, smokeHelp, smokeTraining, smokeDeploy, smokeResearch, smokeResearchDetail, smokeProgression, smokeBuildCatalog, smokeBuildCatalogDetail, smokeWallRow, smokeWallAxes, smokeHeroes, smokePets, smokeEquipment, smokeLayoutEditor, smokeLayoutTray, smokeLayoutPointer, smokeRotated, smokeDetail, smokeArmyDetail, smokeHudInput, smokeWorldDrag;
         private DateTime smokeRequestedUtc;
         private int smokeFrames;
         private float smokeDetailStartedAt;
@@ -46,27 +46,40 @@ namespace Hearthhold.UnityClient
             Application.targetFrameRate = 60;
             smokeCapturePath = CommandLineValue("-hearthhold-smoke");
             smokeBattle = HasCommandLineFlag("-hearthhold-smoke-battle");
+            smokeCombatFeedback = HasCommandLineFlag("-hearthhold-smoke-combat-feedback");
+            smokeSpellFields = HasCommandLineFlag("-hearthhold-smoke-spell-fields");
+            smokeArtProof = HasCommandLineFlag("-hearthhold-smoke-art-proof");
+            smokeArtProofRotated = HasCommandLineFlag("-hearthhold-smoke-art-proof-rotated");
             smokeCampaign = HasCommandLineFlag("-hearthhold-smoke-campaign");
+            smokeHelp = HasCommandLineFlag("-hearthhold-smoke-help");
             smokeTraining = HasCommandLineFlag("-hearthhold-smoke-training");
             smokeResearch = HasCommandLineFlag("-hearthhold-smoke-research");
+            smokeResearchDetail = HasCommandLineFlag("-hearthhold-smoke-research-detail");
             smokeProgression = HasCommandLineFlag("-hearthhold-smoke-progression");
             smokeBuildCatalog = HasCommandLineFlag("-hearthhold-smoke-build-catalog");
+            smokeBuildCatalogDetail = HasCommandLineFlag("-hearthhold-smoke-build-catalog-detail");
             smokeWallRow = HasCommandLineFlag("-hearthhold-smoke-wall-row");
             smokeWallAxes = HasCommandLineFlag("-hearthhold-smoke-wall-axes");
             smokeLayoutEditor = HasCommandLineFlag("-hearthhold-smoke-layout-editor");
             smokeLayoutTray = HasCommandLineFlag("-hearthhold-smoke-layout-tray");
+            smokeLayoutPointer = HasCommandLineFlag("-hearthhold-smoke-layout-pointer");
             smokeHeroes = HasCommandLineFlag("-hearthhold-smoke-heroes");
             smokePets = HasCommandLineFlag("-hearthhold-smoke-pets");
+            smokeEquipment = HasCommandLineFlag("-hearthhold-smoke-equipment");
             smokeDeploy = HasCommandLineFlag("-hearthhold-smoke-deploy");
             smokeRotated = HasCommandLineFlag("-hearthhold-smoke-rotated");
             smokeDetail = HasCommandLineFlag("-hearthhold-smoke-detail");
             smokeArmyDetail = HasCommandLineFlag("-hearthhold-smoke-army-detail");
+            smokeHudInput = HasCommandLineFlag("-hearthhold-smoke-hud-input");
+            smokeWorldDrag = HasCommandLineFlag("-hearthhold-smoke-world-drag");
             if (!string.IsNullOrEmpty(smokeCapturePath))
             {
                 Application.runInBackground = true;
                 smokeCapturePath = Path.GetFullPath(smokeCapturePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(smokeCapturePath));
-                savePath = Path.ChangeExtension(smokeCapturePath, ".village.xml");
+                string smokeSavePath = CommandLineValue("-hearthhold-smoke-save-path");
+                savePath = string.IsNullOrEmpty(smokeSavePath) ? Path.ChangeExtension(smokeCapturePath, ".village.xml") : Path.GetFullPath(smokeSavePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(savePath));
             }
             else savePath = Path.Combine(Application.persistentDataPath, "village.xml");
             try
@@ -110,18 +123,28 @@ namespace Hearthhold.UnityClient
             RebuildBuildings();
             if (smokeDeploy) PrepareDeploySmoke();
             else if (smokeBattle) PrepareBattleSmoke();
+            else if (smokeCombatFeedback) PrepareCombatFeedbackSmoke();
+            else if (smokeSpellFields) PrepareSpellFieldSmoke();
+            else if (smokeArtProof || smokeArtProofRotated) PrepareArtProofSmoke(smokeArtProofRotated);
             else if (smokeCampaign) PrepareCampaignSmoke();
             else if (smokeTraining) PrepareTrainingSmoke();
-            else if (smokeResearch) PrepareResearchSmoke();
+            else if (smokeResearch || smokeResearchDetail) { PrepareResearchSmoke(); if (smokeResearchDetail) researchSelection = 0; }
             else if (smokeProgression) PrepareProgressionSmoke();
-            else if (smokeBuildCatalog) PrepareBuildCatalogSmoke();
+            else if (smokeBuildCatalog || smokeBuildCatalogDetail) PrepareBuildCatalogSmoke();
             else if (smokeWallRow) PrepareWallRowSmoke();
             else if (smokeWallAxes) PrepareWallAxesSmoke();
-            else if (smokeLayoutEditor || smokeLayoutTray) PrepareLayoutEditorSmoke(smokeLayoutTray);
-            else if (smokeHeroes || smokePets) PrepareHeroesSmoke(smokePets);
+            else if (smokeLayoutEditor || smokeLayoutTray || smokeLayoutPointer) PrepareLayoutEditorSmoke(smokeLayoutTray);
+            else if (smokeHeroes || smokePets || smokeEquipment) PrepareHeroesSmoke(smokePets);
             else if (!string.IsNullOrEmpty(smokeCapturePath))
             {
                 PrepareHomeSmoke();
+                if (smokeHudInput)
+                {
+                    foreach (Building building in session.Village.Buildings)
+                        if (building.Kind == BuildingKind.Keep) { session.Upgrade(building.Id); break; }
+                    foreach (Building building in session.Village.Buildings)
+                        if (building.Kind != BuildingKind.Keep) { selected = building.Id; break; }
+                }
                 if (smokeDetail)
                 {
                     foreach (Building building in session.Village.Buildings)
@@ -146,7 +169,13 @@ namespace Hearthhold.UnityClient
             }
             uiFont = Font.CreateDynamicFontFromOSFont(new[] { "Microsoft YaHei UI", "Microsoft YaHei", "Arial" }, 16);
             InitializeModernHud();
-            if (smokeBuildCatalog) { showBuildCatalog = false; OpenModernBuildCatalog(); }
+            if (smokeCampaign) StartCoroutine(VerifyCampaignModalInputSmoke());
+            if (smokeHelp) { help = true; RefreshModernHud(); RefreshHelpHud(); }
+            if (smokeBuildCatalog || smokeBuildCatalogDetail)
+            {
+                showBuildCatalog = false; OpenModernBuildCatalog();
+                if (smokeBuildCatalogDetail) SmokeOpenModernCatalogDetail(BuildingKind.Laboratory);
+            }
         }
         private static string CommandLineValue(string name)
         {
@@ -161,14 +190,33 @@ namespace Hearthhold.UnityClient
         }
         private void LateUpdate()
         {
+            DispatchModernInspectorClick();
+            DispatchModalPointerClick();
             UpdateDetailPreview();
             if (string.IsNullOrEmpty(smokeCapturePath)) return;
             smokeFrames++;
             // Let imported attack takes finish before the detail smoke captures and exits.
-            int captureFrame = smokeArmyDetail ? 180 : smokeBattle ? 90 : smokeDeploy ? 40 : 20;
+            int captureFrame = smokeArmyDetail ? 180 : smokeBattle ? 90 : smokeCombatFeedback ? 45 : smokeSpellFields ? 75 : smokeArtProof || smokeArtProofRotated ? 55 : smokeDeploy ? 40 : 20;
             if (smokeFrames >= captureFrame && smokeRequestedUtc == default(DateTime)
                 && (!smokeArmyDetail || Time.realtimeSinceStartup - smokeDetailStartedAt >= 2.6f))
             {
+                if (smokeHudInput && !smokeModalVerified)
+                {
+                    if (!smokeHudBaseVerified)
+                    {
+                        if (!VerifyModernHudInputSmoke()) { Application.Quit(7); return; }
+                        smokeHudBaseVerified = true;
+                        StartCoroutine(VerifyModalHudInputSmoke());
+                    }
+                    return;
+                }
+                if (smokeWorldDrag && !VerifyWorldDragSmoke()) { Application.Quit(9); return; }
+                if (smokeHelp && (helpHudRoot == null || !helpHudRoot.activeInHierarchy || !ModernHomeHudOwnsOnGUI))
+                { Debug.LogError("HEARTHHOLD_HELP_UGUI_FAILED: the village handbook fell back to the legacy HUD."); Application.Quit(12); return; }
+                if (smokeHelp) Debug.Log("HEARTHHOLD_HELP_UGUI_SMOKE_READY: styled handbook remains over the live uGUI HUD.");
+                if (smokeSpellFields && !VerifySpellFieldSmoke()) { Application.Quit(10); return; }
+                if (smokeCombatFeedback && !VerifyCombatFeedbackSmoke()) { Application.Quit(13); return; }
+                if ((smokeArtProof || smokeArtProofRotated) && !VerifyArtProofSmoke()) { Application.Quit(11); return; }
                 if (smokeBattle && (troopActionsPresented == 0 || defenseActionsPresented == 0))
                 {
                     Debug.LogError("HEARTHHOLD_ACTION_SMOKE_FAILED: troop=" + troopActionsPresented + " defense=" + defenseActionsPresented);
@@ -229,9 +277,8 @@ namespace Hearthhold.UnityClient
         {
             Piece("River", PrimitiveType.Cube, new Vector3(20, -1.2f, 20), new Vector3(95, 0.1f, 95), new Color32(50, 91, 96, 255), sceneryRoot);
             Piece("Island cliff", PrimitiveType.Cube, new Vector3(20, -0.65f, 20), new Vector3(40.6f, 1.2f, 40.6f), new Color32(102, 101, 76, 255), sceneryRoot);
-            Piece("Meadow", PrimitiveType.Cube, new Vector3(20, -0.08f, 20), new Vector3(40, 0.15f, 40), new Color32(99, 128, 77, 255), sceneryRoot);
-            Piece("East road", PrimitiveType.Cube, new Vector3(20.5f, 0.012f, 23.5f), new Vector3(19, 0.03f, 1), new Color32(168, 151, 104, 255), sceneryRoot);
-            Piece("North road", PrimitiveType.Cube, new Vector3(20.5f, 0.012f, 19.5f), new Vector3(1, 0.03f, 18), new Color32(168, 151, 104, 255), sceneryRoot);
+            Piece("Meadow foundation", PrimitiveType.Cube, new Vector3(20, -0.08f, 20), new Vector3(40, 0.15f, 40), new Color32(99, 128, 77, 255), sceneryRoot);
+            MeadowSurface.Create(sceneryRoot);
             for (int i = 0; i < 76; i++)
             {
                 float t = i % 19 * 2.15f;
@@ -287,12 +334,16 @@ namespace Hearthhold.UnityClient
             if (session == null) return;
             if (session.AdvanceTraining(DateTime.UtcNow)) Save();
             RefreshModernHud();
+            RefreshModalHud();
+            RefreshHelpHud();
+            TrackModernInspectorMouse();
+            TrackModalPointer();
             if (!layoutEditing && Input.GetKeyDown(KeyCode.F1)) help = !help;
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 if (layoutEditing) CancelLayoutEditor();
                 else if (modernCatalogOpen) modernCatalogOpen = false;
-                else { help = false; buildKind = null; moving = -1; movingWallRow = false; heal = fury = freeze = breach = focusOrder = heroDeploy = false; selected = -1; selectedWallIds.Clear(); CloseExtraModals(); }
+                else { help = false; ResetWorldDrag(); CancelWorldAction(); selected = -1; selectedWallIds.Clear(); CloseExtraModals(); }
             }
             if (Input.GetKeyDown(KeyCode.I) && demolishId < 0 && !showBrief) showArmyGuide = !showArmyGuide;
             if (Input.GetKeyDown(KeyCode.T) && session.Battle == null && demolishId < 0) showTraining = !showTraining;
@@ -332,7 +383,8 @@ namespace Hearthhold.UnityClient
                 UpdateLayoutEditor(); UpdateSelectionPresentation();
                 return;
             }
-            if (Input.GetMouseButtonDown(1)) { buildKind = null; moving = -1; movingWallRow = false; heal = fury = freeze = breach = focusOrder = heroDeploy = false; selected = -1; selectedWallIds.Clear(); }
+            if (Input.GetMouseButtonDown(1)) { ResetWorldDrag(); CancelWorldAction(); selected = -1; selectedWallIds.Clear(); }
+            UpdateWorldDrag();
             if (session.Battle != null)
             {
                 for (int i = 0; i < Rules.Troops.Length; i++) if (Input.GetKeyDown((KeyCode)((int)KeyCode.Alpha1 + i))) { troop = (TroopKind)i; heal = fury = freeze = breach = focusOrder = heroDeploy = false; }
@@ -366,6 +418,7 @@ namespace Hearthhold.UnityClient
             if (!OverHud() && GroundPoint(out ground))
             {
                 int x = Mathf.FloorToInt(ground.x), z = Mathf.FloorToInt(ground.z);
+                if (worldDragActive && moving >= 0) { x -= worldDragGrabX; z -= worldDragGrabZ; }
                 Building movingBuilding = session.Find(moving);
                 BuildingKind? placeKind = movingBuilding != null ? movingBuilding.Kind : buildKind;
                 bool placing = session.Battle == null && placeKind.HasValue;
@@ -381,9 +434,11 @@ namespace Hearthhold.UnityClient
                     bool valid = session.Village.CanPlace(placeKind.Value, x, z, moving) && (movingBuilding != null || !session.Village.AtLimit(placeKind.Value) && session.Village.Gold >= Rules.Spec(placeKind.Value).Cost);
                     ShowPlacementPresentation(placeKind.Value, movingBuilding == null ? 1 : movingBuilding.Level, x, z, size, valid);
                 }
+                else HidePlacementPresentation();
                 deployElapsed += dt;
                 bool repeat = Input.GetMouseButton(0) && deployElapsed > 0.15f && (session.Battle != null && !heal && !fury && !freeze && !breach && !focusOrder || placeKind == BuildingKind.Wall);
-                if (Input.GetMouseButtonDown(0) || repeat) { HandleMapClick(x, z); deployElapsed = 0; }
+                bool clickToPlace = session.Battle != null || buildKind.HasValue || moving >= 0 && !worldDragActive;
+                if (clickToPlace && (Input.GetMouseButtonDown(0) || repeat)) { HandleMapClick(x, z); deployElapsed = 0; }
             }
             else HidePlacementPresentation();
             UpdateSelectionPresentation();
@@ -397,10 +452,21 @@ namespace Hearthhold.UnityClient
             if (new Plane(Vector3.up, Vector3.zero).Raycast(ray, out distance)) { point = ray.GetPoint(distance); return true; }
             point = Vector3.zero; return false;
         }
-        private bool OverHud()
+        private void CancelWorldAction()
         {
-            float x = Input.mousePosition.x, y = Screen.height - Input.mousePosition.y;
-            return help || ExtraModal || modernCatalogOpen || session.Battle != null && session.Battle.Finished || y < 100 || y > Screen.height - (session.Battle == null ? 112 : 155) || x < 250 && y < (session.Battle == null ? 410 : 575) || (selected >= 0 || session.Battle != null) && x > Screen.width - 270 && y < 490;
+            buildKind = null; moving = -1; movingWallRow = false;
+            heal = fury = freeze = breach = focusOrder = heroDeploy = false;
+            HidePlacementPresentation();
+        }
+        private bool OverHud() { return OverHudAt(Input.mousePosition); }
+        private bool OverHudAt(Vector2 screenPosition)
+        {
+            if (help || ExtraModal || modernCatalogOpen || session.Battle != null && session.Battle.Finished) return true;
+            if (ModernHomeHudOwnsOnGUI) return ModernHudContainsPointer(screenPosition);
+            float x = screenPosition.x, y = Screen.height - screenPosition.y;
+            return y < 100 || y > Screen.height - (session.Battle == null ? 112 : 155)
+                || x < 250 && y < (session.Battle == null ? 410 : 575)
+                || (selected >= 0 || session.Battle != null) && x > Screen.width - 270 && y < 490;
         }
         private void HandleMapClick(int x, int z)
         {
@@ -452,10 +518,14 @@ namespace Hearthhold.UnityClient
                 }
                 ArticulatedModelAnimator articulated = obj.GetComponent<ArticulatedModelAnimator>();
                 ImportedClipAnimator importedClips = obj.GetComponent<ImportedClipAnimator>();
+                CinderFoxArtAnimator fox = obj.GetComponent<CinderFoxArtAnimator>();
+                MossbackArtAnimator mossback = obj.GetComponent<MossbackArtAnimator>();
                 if (unit.Health <= 0)
                 {
                     if (importedClips != null) importedClips.Die();
                     else if (articulated != null) articulated.Die();
+                    else if (fox != null) fox.Die();
+                    else if (mossback != null) mossback.Die();
                     else obj.SetActive(false);
                     continue;
                 }
@@ -464,6 +534,8 @@ namespace Hearthhold.UnityClient
                 Vector3 motion = desired - obj.transform.position;
                 if (articulated != null) articulated.SetMoving(motion.sqrMagnitude > 0.001f);
                 if (importedClips != null) importedClips.SetMoving(motion.sqrMagnitude > 0.001f);
+                if (fox != null) fox.SetMoving(motion.sqrMagnitude > 0.001f);
+                if (mossback != null) mossback.SetMoving(motion.sqrMagnitude > 0.001f);
                 obj.transform.position = Vector3.Lerp(obj.transform.position, desired, 1 - Mathf.Exp(-Time.deltaTime * 14));
                 if (motion.sqrMagnitude > 0.0001f) obj.transform.rotation = Quaternion.Slerp(obj.transform.rotation, Quaternion.LookRotation(motion), 1 - Mathf.Exp(-Time.deltaTime * 11));
             }
@@ -478,9 +550,9 @@ namespace Hearthhold.UnityClient
         {
             // Smoke scenes deliberately reshape the in-memory village (and may overlap
             // fixtures to exercise rendering). They must never overwrite a real save.
-            if (smokeBattle || smokeCampaign || smokeTraining || smokeDeploy || smokeResearch ||
-                smokeProgression || smokeBuildCatalog || smokeWallRow || smokeWallAxes || smokeLayoutEditor || smokeLayoutTray ||
-                smokeHeroes || smokePets || smokeRotated || smokeDetail || smokeArmyDetail)
+            if (smokeBattle || smokeCombatFeedback || smokeCampaign || smokeTraining || smokeDeploy || smokeResearch || smokeResearchDetail || smokeBuildCatalogDetail || smokeArtProof || smokeArtProofRotated ||
+                smokeProgression || smokeBuildCatalog || smokeWallRow || smokeWallAxes || smokeLayoutEditor || smokeLayoutTray || smokeLayoutPointer ||
+                smokeHeroes || smokePets || smokeEquipment || smokeRotated || smokeDetail || smokeArmyDetail)
                 return;
 
             if (layoutEditing) CancelLayoutEditor(false);
@@ -493,6 +565,7 @@ namespace Hearthhold.UnityClient
             DisposeDetailPreview();
             DisposeLayoutEditor();
             DisposeModernHud();
+            DisposeHelpHud();
             DisposeLegacyForgeSkin();
             modelViews.Dispose();
             DisposePresentation();
@@ -531,14 +604,13 @@ namespace Hearthhold.UnityClient
             if (session == null) return;
             if (ModernHomeHudOwnsOnGUI)
             {
-                if (ExtraModal) DrawExtraModals();
                 GUI.enabled = true; return;
             }
             bool finished = session.Battle != null && session.Battle.Finished;
             GUI.enabled = !help && !finished && !ExtraModal;
             Box(new Rect(0, 0, Screen.width, 90));
             GUI.Label(new Rect(24, 17, 310, 42), "篝火堡垒  HEARTHHOLD", heading);
-            GUI.Label(new Rect(Screen.width - 505, 23, 365, 35), "金币 " + session.Village.Gold + "    晶露 " + session.Village.Crystal, label);
+            GUI.Label(new Rect(Screen.width - 712, 23, 572, 35), "金币 " + session.Village.Gold + "  晶露 " + session.Village.Crystal + "  印记 " + session.Village.CoreSigils + "  粉尘 " + session.Village.Stardust, label);
             if (!layoutEditing && GUI.Button(new Rect(Screen.width - 118, 21, 94, 40), "帮助 F1")) help = true;
             if (layoutEditing) { DrawLayoutEditorHud(); GUI.enabled = true; return; }
             Box(new Rect(20, 112, 225, session.Battle == null ? 322 : 455));
@@ -577,7 +649,6 @@ namespace Hearthhold.UnityClient
                 if (battle.PetLevels[0] > 0) GUI.Label(new Rect(36, 493, 192, 34), petUnit == null ? "战宠：随英雄待命" : petUnit.BondedHeroUnitId >= 0 ? "战宠：跟随协攻" : "战宠：独立作战", small);
                 GUI.backgroundColor = Color.white;
             }
-            GUI.Label(new Rect(265, 108, Screen.width - 550, 55), session.Notice, small);
             if (selected >= 0 && session.Battle == null)
             {
                 Building b = session.Find(selected);
@@ -648,7 +719,6 @@ namespace Hearthhold.UnityClient
                 GUI.backgroundColor = Color.white;
                 if (GUI.Button(new Rect(Screen.width - 221, Screen.height - 110, 199, 48), "结束进攻")) { session.Battle.Finish(); session.Settle(); Save(); }
             }
-            if (session.Battle != null) GUI.Label(new Rect(22, Screen.height - 32, Screen.width - 30, 30), "1—8投兵 · H投英雄 · V英雄技能 · Q/Z/X/C法术 · F集火 · 右键取消", small);
             DrawBattleOverlay();
             DrawTroopCard();
             GUI.enabled = true;
@@ -657,7 +727,7 @@ namespace Hearthhold.UnityClient
                 Battle b = session.Battle; float x = Screen.width / 2f - 220, y = Screen.height / 2f - 145;
                 Box(new Rect(x, y, 440, 290));
                 GUI.Label(new Rect(x + 34, y + 25, 380, 45), b.Stars > 0 ? "远征凯旋" : "远征结束", heading);
-                GUI.Label(new Rect(x + 34, y + 86, 380, 125), "破坏率 " + b.Destruction + "%   /   " + b.Stars + " 星\n+ " + b.GoldReward + " 金币  /  + " + b.CrystalReward + " 晶露\n关卡最佳 " + session.Village.CampaignStars[b.Mission] + " 星 · " + session.Village.CampaignBest[b.Mission] + "%", label);
+                GUI.Label(new Rect(x + 34, y + 86, 380, 125), "破坏率 " + b.Destruction + "%   /   " + b.Stars + " 星\n+ " + b.GoldReward + " 金币  /  + " + b.CrystalReward + " 晶露\n" + (b.SigilReward > 0 || b.StardustReward > 0 ? "+ " + b.SigilReward + " 炉心印记  /  + " + b.StardustReward + " 星辉粉尘\n" : "") + "关卡最佳 " + session.Village.CampaignStars[b.Mission] + " 星 · " + session.Village.CampaignBest[b.Mission] + "%", label);
                 if (GUI.Button(new Rect(x + 32, y + 219, 376, 45), "返回聚落")) ReturnHome();
             }
             if (help)
@@ -668,7 +738,6 @@ namespace Hearthhold.UnityClient
                 GUI.Label(new Rect(x + 25, y + 82, 490, 250), "常用入口：B建造目录、T编队训练、I兵种图鉴。\n地图操作：左键选择/放置，右键或Esc取消。\n建筑操作：M移动、U升级、Del拆除；Ctrl+Z/Y撤销/重做移动。\n镜头操作：WASD或中键平移，滚轮缩放；R / Shift+R旋转，Home复位。\n远征：1—8选兵，H投英雄，V英雄技能；Q/Z/X/C法术，F集火。\nF11切换全屏；本地进度每15秒自动保存。", label);
                 if (GUI.Button(new Rect(x + 25, y + 315, 490, 42), "继续游戏")) help = false;
             }
-            DrawExtraModals();
         }
         private void DrawBattleOverlay()
         {

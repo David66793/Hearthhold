@@ -9,6 +9,7 @@ namespace Hearthhold.Core
         public readonly List<Building> Buildings = new List<Building>();
         public readonly List<Unit> Units = new List<Unit>();
         public readonly List<CombatEffect> Effects = new List<CombatEffect>();
+        public readonly List<SpellZone> SpellZones = new List<SpellZone>();
         public readonly List<string> Commands = new List<string>();
         public readonly int[] Available = new int[Rules.Troops.Length];
         public readonly int[] TroopLevels = new int[Rules.Troops.Length];
@@ -17,13 +18,15 @@ namespace Hearthhold.Core
         public readonly bool[] HeroDeployed = new bool[Rules.Heroes.Length];
         public readonly int[] PetLevels = new int[Rules.Pets.Length];
         public readonly int[] HeroPetAssignments = new int[Rules.Heroes.Length];
+        public readonly int[] EquipmentLevels = new int[Rules.EquipmentNames.Length];
+        public readonly int[] HeroEquipmentSlots = new int[Rules.Heroes.Length * 2];
         public readonly Building[,] Occupied = new Building[Rules.MapSize, Rules.MapSize];
         private readonly Dictionary<int, int[]> approachCosts = new Dictionary<int, int[]>();
         private readonly Dictionary<int, int> targetSummaryCounts = new Dictionary<int, int>();
         public int TickNumber, Revision, Mission, SpellCharges = 2, FuryCharges = 1, FreezeCharges = 1, BreachCharges = 1,
             FocusCharges = 2, FocusTargetId = -1, FocusTicks, HeroSkillCharges = 1, HealLevel = 1, NextUnitId = 1, InitialHousing;
         public bool Started, Finished, Settled;
-        public int GoldReward, CrystalReward;
+        public int GoldReward, CrystalReward, SigilReward, StardustReward;
         public Battle(int mission) : this(Missions.Create(mission), mission) { }
         public Battle(List<Building> buildings, int mission) : this(buildings, mission, null) { }
         public Battle(List<Building> buildings, int mission, int[] army) : this(buildings, mission, army, null, new[] { 1, 1, 1, 1 }) { }
@@ -34,6 +37,8 @@ namespace Hearthhold.Core
         public Battle(List<Building> buildings, int mission, int[] army, int[] troopLevels, int[] spellLevels, int[] heroLevels)
             : this(buildings, mission, army, troopLevels, spellLevels, heroLevels, null, null) { }
         public Battle(List<Building> buildings, int mission, int[] army, int[] troopLevels, int[] spellLevels, int[] heroLevels, int[] petLevels, int[] heroPetAssignments)
+            : this(buildings, mission, army, troopLevels, spellLevels, heroLevels, petLevels, heroPetAssignments, null, null) { }
+        public Battle(List<Building> buildings, int mission, int[] army, int[] troopLevels, int[] spellLevels, int[] heroLevels, int[] petLevels, int[] heroPetAssignments, int[] equipmentLevels, int[] heroEquipmentSlots)
         {
             Mission = mission;
             for (int i = 0; i < SpellLevels.Length; i++) SpellLevels[i] = spellLevels != null && i < spellLevels.Length ? Math.Max(0, Math.Min(3, spellLevels[i])) : 1;
@@ -55,7 +60,14 @@ namespace Hearthhold.Core
             for (int i = 0; i < HeroLevels.Length; i++) HeroLevels[i] = heroLevels != null && i < heroLevels.Length ? Math.Max(0, Math.Min(4, heroLevels[i])) : 0;
             for (int i = 0; i < PetLevels.Length; i++) PetLevels[i] = petLevels != null && i < petLevels.Length ? Math.Max(0, Math.Min(4, petLevels[i])) : 0;
             for (int i = 0; i < HeroPetAssignments.Length; i++) HeroPetAssignments[i] = heroPetAssignments != null && i < heroPetAssignments.Length ? heroPetAssignments[i] : -1;
+            for (int i = 0; i < EquipmentLevels.Length; i++) EquipmentLevels[i] = equipmentLevels != null && i < equipmentLevels.Length ? Math.Max(0, Math.Min(3, equipmentLevels[i])) : 0;
+            for (int i = 0; i < HeroEquipmentSlots.Length; i++) HeroEquipmentSlots[i] = heroEquipmentSlots != null && i < heroEquipmentSlots.Length ? heroEquipmentSlots[i] : -1;
             RebuildGrid();
+        }
+        private int EquippedLevel(HeroKind hero, EquipmentKind kind)
+        {
+            int start = (int)hero * 2, gear = (int)kind;
+            return (HeroEquipmentSlots[start] == gear || HeroEquipmentSlots[start + 1] == gear) ? EquipmentLevels[gear] : 0;
         }
         public int SecondsLeft { get { return Math.Max(0, 180 - TickNumber / Rules.TicksPerSecond); } }
         public int Destruction
@@ -160,18 +172,26 @@ namespace Hearthhold.Core
             foreach (Unit unit in Units) if (unit.IsHero && unit.HeroKind == kind && unit.Health > 0) { hero = unit; break; }
             if (hero == null) return false;
             hero.Health = Math.Min(MaxHealth(hero), hero.Health + MaxHealth(hero) * 30 / 100);
-            hero.FuryTicks = Math.Max(hero.FuryTicks, 160);
-            foreach (Unit unit in Units) if (unit.Health > 0 && Distance(hero.X, hero.Z, unit.X, unit.Z) <= 5000L * 5000) unit.FuryTicks = Math.Max(unit.FuryTicks, 160);
-            HeroSkillCharges--; Effects.Add(new CombatEffect(hero.X, hero.Z, hero.X, hero.Z, 40, 12)); Commands.Add(TickNumber + ":hero-skill:" + (int)kind); return true;
+            int torch = EquippedLevel(kind, EquipmentKind.MarchTorch), chalice = EquippedLevel(kind, EquipmentKind.EmberChalice);
+            int furyTicks = torch > 0 ? (8 + torch) * Rules.TicksPerSecond : 160;
+            long furyRadius = torch > 0 ? 5500L + torch * 500L : 5000L;
+            hero.FuryTicks = Math.Max(hero.FuryTicks, furyTicks);
+            foreach (Unit unit in Units)
+            {
+                if (unit.Health <= 0) continue;
+                if (Distance(hero.X, hero.Z, unit.X, unit.Z) <= furyRadius * furyRadius) unit.FuryTicks = Math.Max(unit.FuryTicks, furyTicks);
+                if (chalice > 0 && Distance(hero.X, hero.Z, unit.X, unit.Z) <= 5000L * 5000)
+                    unit.Health = Math.Min(MaxHealth(unit), unit.Health + MaxHealth(unit) * (10 + chalice * 5) / 100);
+            }
+            HeroSkillCharges--; Effects.Add(new CombatEffect(hero.X, hero.Z, hero.X, hero.Z, furyTicks, 12)); Commands.Add(TickNumber + ":hero-skill:" + (int)kind); return true;
         }
         public bool CastHeal(int x, int z)
         {
             if (SpellLevels[(int)SpellKind.Heal] <= 0 || !Started || Finished || SpellCharges <= 0 || x < 0 || z < 0 || x >= 40000 || z >= 40000) return false;
             SpellCharges--;
-            foreach (Unit u in Units)
-                if (u.Health > 0 && Distance(u.X, u.Z, x, z) <= 5000L * 5000)
-                    u.Health = Math.Min(MaxHealth(u), u.Health + MaxHealth(u) * (20 + (HealLevel - 1) * 3) / 30);
-            Effects.Add(new CombatEffect(x, z, x, z, 24, 3));
+            SpellZone zone = new SpellZone(SpellKind.Heal, x, z, HealLevel);
+            SpellZones.Add(zone); ApplyHealPulse(zone);
+            Effects.Add(new CombatEffect(x, z, x, z, zone.TicksLeft, 3));
             Commands.Add(TickNumber + ":heal:" + x + ":" + z);
             return true;
         }
@@ -179,30 +199,24 @@ namespace Hearthhold.Core
         {
             int level = SpellLevels[(int)SpellKind.Fury];
             if (level <= 0 || !ValidSpellTarget(x, z) || FuryCharges <= 0) return false;
-            bool affected = false;
-            foreach (Unit u in Units)
-                if (u.Health > 0 && Distance(u.X, u.Z, x, z) <= 4500L * 4500)
-                { u.FuryTicks = Math.Max(u.FuryTicks, 120 + (level - 1) * 20); affected = true; }
-            if (!affected) return false;
-            FuryCharges--; Effects.Add(new CombatEffect(x, z, x, z, 35, 7)); Commands.Add(TickNumber + ":fury:" + x + ":" + z); return true;
+            SpellZone zone = new SpellZone(SpellKind.Fury, x, z, level);
+            FuryCharges--; SpellZones.Add(zone); ApplySpellZone(zone);
+            Effects.Add(new CombatEffect(x, z, x, z, zone.TicksLeft, 7)); Commands.Add(TickNumber + ":fury:" + x + ":" + z); return true;
         }
         public bool CastFreeze(int x, int z)
         {
             int level = SpellLevels[(int)SpellKind.Freeze];
             if (level <= 0 || !ValidSpellTarget(x, z) || FreezeCharges <= 0) return false;
-            bool affected = false;
-            foreach (Building b in Buildings)
-                if (b.Health > 0 && b.Spec.Damage > 0 && b.DistanceSquared(x, z) <= 4000L * 4000)
-                { b.FrozenTicks = Math.Max(b.FrozenTicks, 80 + (level - 1) * 20); affected = true; }
-            if (!affected) return false;
-            FreezeCharges--; Effects.Add(new CombatEffect(x, z, x, z, 32, 8)); Commands.Add(TickNumber + ":freeze:" + x + ":" + z); return true;
+            SpellZone zone = new SpellZone(SpellKind.Freeze, x, z, level);
+            FreezeCharges--; SpellZones.Add(zone); ApplySpellZone(zone);
+            Effects.Add(new CombatEffect(x, z, x, z, zone.TicksLeft, 8)); Commands.Add(TickNumber + ":freeze:" + x + ":" + z); return true;
         }
         public bool CastBreach(int x, int z)
         {
             int level = SpellLevels[(int)SpellKind.Breach];
             if (level <= 0 || !ValidSpellTarget(x, z) || BreachCharges <= 0) return false;
             bool affected = false;
-            long radius = 3600L + (level - 1) * 600L;
+            long radius = Rules.SpellRadius(SpellKind.Breach, level);
             foreach (Building b in Buildings)
                 if (b.Health > 0 && b.Kind == BuildingKind.Wall && b.DistanceSquared(x, z) <= radius * radius)
                 { b.Health = 0; affected = true; }
@@ -210,6 +224,45 @@ namespace Hearthhold.Core
             BreachCharges--; Revision++; RebuildGrid(); Effects.Add(new CombatEffect(x, z, x, z, 30, 9)); Commands.Add(TickNumber + ":breach:" + x + ":" + z); return true;
         }
         private bool ValidSpellTarget(int x, int z) { return Started && !Finished && x >= 0 && z >= 0 && x < 40000 && z < 40000; }
+        private void ApplyHealPulse(SpellZone zone)
+        {
+            long radius = Rules.SpellRadius(SpellKind.Heal, zone.Level);
+            int pulses = Rules.SpellDurationTicks(SpellKind.Heal, zone.Level) / Rules.TicksPerSecond;
+            int totalPercent = 72 + (zone.Level - 1) * 8;
+            foreach (Unit unit in Units)
+                if (unit.Health > 0 && Distance(unit.X, unit.Z, zone.X, zone.Z) <= radius * radius)
+                {
+                    int amount = Math.Max(1, MaxHealth(unit) * totalPercent / (pulses * 100));
+                    unit.Health = Math.Min(MaxHealth(unit), unit.Health + amount);
+                }
+        }
+        private void ApplySpellZone(SpellZone zone)
+        {
+            long radius = Rules.SpellRadius(zone.Kind, zone.Level);
+            if (zone.Kind == SpellKind.Fury)
+            {
+                foreach (Unit unit in Units)
+                    if (unit.Health > 0 && Distance(unit.X, unit.Z, zone.X, zone.Z) <= radius * radius)
+                        unit.FuryTicks = Math.Max(unit.FuryTicks, 2);
+            }
+            else if (zone.Kind == SpellKind.Freeze)
+            {
+                foreach (Building building in Buildings)
+                    if (building.Health > 0 && building.Spec.Damage > 0 && building.DistanceSquared(zone.X, zone.Z) <= radius * radius)
+                        building.FrozenTicks = Math.Max(building.FrozenTicks, 2);
+            }
+        }
+        private void AdvanceSpellZones()
+        {
+            for (int i = SpellZones.Count - 1; i >= 0; i--)
+            {
+                SpellZone zone = SpellZones[i];
+                if (zone.Kind == SpellKind.Heal && zone.TicksLeft < Rules.SpellDurationTicks(zone.Kind, zone.Level)
+                    && zone.TicksLeft % Rules.TicksPerSecond == 0) ApplyHealPulse(zone);
+                else ApplySpellZone(zone);
+                if (--zone.TicksLeft <= 0) SpellZones.RemoveAt(i);
+            }
+        }
         // A short-lived command that redirects the army without dealing free damage.
         // The player must expose a reachable target and keep troops alive long enough to exploit it.
         public bool CastFocus(int x, int z)
@@ -237,6 +290,7 @@ namespace Hearthhold.Core
             TickNumber++;
             if (FocusTicks > 0 && --FocusTicks == 0) { FocusTargetId = -1; foreach (Unit unit in Units) unit.TargetId = -1; }
             for (int i = Effects.Count - 1; i >= 0; i--) if (--Effects[i].Ticks <= 0) Effects.RemoveAt(i);
+            AdvanceSpellZones();
             int activeUnits = Units.Count;
             for (int i = 0; i < activeUnits; i++) if (Units[i].Health > 0) StepUnit(Units[i]);
             foreach (Building b in Buildings)
@@ -262,11 +316,11 @@ namespace Hearthhold.Core
                         else { b.LockedUnitId = target.Id; b.LockTicks = 0; }
                         defenseDamage = defenseDamage * (100 + b.LockTicks * 3) / 100;
                     }
-                    target.Health = Math.Max(0, target.Health - defenseDamage);
+                    target.Health = Math.Max(0, target.Health - MitigateDefenseDamage(target, defenseDamage));
                     if (b.Spec.SplashRadius > 0)
                         foreach (Unit nearby in Units)
                             if (nearby != target && nearby.Health > 0 && Distance(target.X, target.Z, nearby.X, nearby.Z) <= (long)b.Spec.SplashRadius * b.Spec.SplashRadius)
-                                nearby.Health = Math.Max(0, nearby.Health - Math.Max(1, defenseDamage * 2 / 3));
+                                nearby.Health = Math.Max(0, nearby.Health - MitigateDefenseDamage(nearby, Math.Max(1, defenseDamage * 2 / 3)));
                     b.Cooldown = Math.Max(8, b.Spec.Cooldown - Math.Min(Mission, 7));
                     Effects.Add(new CombatEffect(b.CenterX, b.CenterZ, target.X, target.Z, 7, b.Kind == BuildingKind.Watchtower ? 5 : 1));
                 }
@@ -274,6 +328,11 @@ namespace Hearthhold.Core
             bool reserves = false; foreach (int count in Available) if (count > 0) reserves = true;
             for (int i = 0; i < HeroLevels.Length; i++) if (HeroAvailable((HeroKind)i)) reserves = true;
             if (Destruction >= 100 || SecondsLeft == 0 || (!reserves && AliveCount == 0)) Finish();
+        }
+        private int MitigateDefenseDamage(Unit unit, int damage)
+        {
+            int shield = unit.IsHero ? EquippedLevel(unit.HeroKind, EquipmentKind.HearthShield) : 0;
+            return shield > 0 ? Math.Max(1, damage * (85 - shield * 5) / 100) : damage;
         }
         private void StepUnit(Unit u)
         {
@@ -289,7 +348,14 @@ namespace Hearthhold.Core
                     int followRange = Rules.Spec(u.PetKind).FollowRange;
                     if (tether > (long)followRange * followRange) { MoveDirect(u, bondedHero.X, bondedHero.Z); return; }
                     Building heroTarget = FindById(bondedHero.TargetId);
-                    if (heroTarget != null && heroTarget.Health > 0) { u.TargetId = heroTarget.Id; u.TargetRevision = Revision; u.PathRevision = -1; }
+                    if (heroTarget != null && heroTarget.Health > 0)
+                    {
+                        Building petTarget = FindById(u.TargetId);
+                        bool breakingWall = petTarget != null && petTarget.Health > 0 && petTarget.Kind == BuildingKind.Wall
+                            && petTarget.DistanceSquared(u.X, u.Z) <= (long)u.Spec.Range * u.Spec.Range;
+                        if (!breakingWall && u.TargetId != heroTarget.Id) { u.TargetId = heroTarget.Id; u.PathRevision = -1; }
+                        u.TargetRevision = Revision;
+                    }
                 }
                 else u.BondedHeroUnitId = -1;
             }
@@ -324,7 +390,11 @@ namespace Hearthhold.Core
             if (obstacle != null && obstacle.Health > 0)
             {
                 if (obstacle.Kind == BuildingKind.Wall && obstacle.DistanceSquared(u.X, u.Z) <= 1200L * 1200)
-                { Attack(u, obstacle); return; }
+                {
+                    // Make the blocking segment the active target until it breaks, then re-evaluate the opened route.
+                    u.TargetId = obstacle.Id; u.TargetRevision = Revision; u.PathRevision = -1;
+                    Attack(u, obstacle); return;
+                }
                 if (obstacle.Kind != BuildingKind.Wall) { u.PathRevision = -1; return; }
             }
             int px = cell.X * 1000 + 500, pz = cell.Z * 1000 + 500;
@@ -375,6 +445,11 @@ namespace Hearthhold.Core
             if (u.IsSummon) damage = Math.Max(1, damage / 2);
             if (u.FuryTicks > 0) damage = damage * 3 / 2;
             if (u.Spec.PreferWalls && b.Kind == BuildingKind.Wall) damage *= 10;
+            if (u.IsHero && b.Kind == BuildingKind.Wall)
+            {
+                int hammer = EquippedLevel(u.HeroKind, EquipmentKind.RiftHammer);
+                if (hammer > 0) damage = damage * (3 + hammer) / 2;
+            }
             b.Health = Math.Max(0, b.Health - damage);
             if (u.Spec.SplashRadius > 0)
                 foreach (Building nearby in Buildings)
@@ -432,6 +507,9 @@ namespace Hearthhold.Core
         {
             if (Finished) return;
             Finished = true;
+            SpellZones.Clear();
+            foreach (CombatEffect effect in Effects)
+                if (effect.Kind == 3 || effect.Kind == 7 || effect.Kind == 8) effect.Ticks = 0;
             GoldReward = Destruction * (4 + Mission * 2) + Stars * 100;
             CrystalReward = Destruction * (2 + Mission) + Stars * 40;
         }
@@ -443,10 +521,13 @@ namespace Hearthhold.Core
             for (int i = 0; i < HeroLevels.Length; i++) s.Append('|').Append(HeroLevels[i]).Append(',').Append(HeroDeployed[i]);
             for (int i = 0; i < PetLevels.Length; i++) s.Append('|').Append(PetLevels[i]);
             foreach (int assignment in HeroPetAssignments) s.Append('|').Append(assignment);
+            foreach (int equipmentLevel in EquipmentLevels) s.Append('|').Append(equipmentLevel);
+            foreach (int equipped in HeroEquipmentSlots) s.Append('|').Append(equipped);
             s
                 .Append('|').Append(FocusCharges).Append('|').Append(FocusTargetId).Append('|').Append(FocusTicks);
             foreach (int level in TroopLevels) s.Append('|').Append(level);
             foreach (int count in Available) s.Append('|').Append(count);
+            foreach (SpellZone zone in SpellZones) s.Append(';').Append((int)zone.Kind).Append(',').Append(zone.X).Append(',').Append(zone.Z).Append(',').Append(zone.Level).Append(',').Append(zone.TicksLeft);
             foreach (Building b in Buildings) s.Append(';').Append(b.Id).Append(',').Append(b.Health).Append(',').Append(b.Cooldown).Append(',').Append(b.FrozenTicks).Append(',').Append(b.LockTicks).Append(',').Append(b.LockedUnitId);
             foreach (Unit u in Units) s.Append(';').Append(u.Id).Append(',').Append(u.X).Append(',').Append(u.Z).Append(',').Append(u.Health).Append(',').Append(u.Cooldown).Append(',').Append(u.TargetId).Append(',').Append(u.TargetRevision).Append(',').Append(u.FuryTicks).Append(',').Append(u.SummonTicks).Append(',').Append(u.IsSummon).Append(',').Append(u.SummonerId).Append(',').Append(u.IsHero).Append(',').Append((int)u.HeroKind).Append(',').Append(u.HeroLevel).Append(',').Append(u.IsPet).Append(',').Append((int)u.PetKind).Append(',').Append(u.PetLevel).Append(',').Append(u.BondedHeroUnitId);
             return s.ToString();

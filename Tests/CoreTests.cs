@@ -15,7 +15,7 @@ internal static class CoreTests
         Stopwatch watch = Stopwatch.StartNew();
         try
         {
-            Construction(); Economy(); Persistence(); Combat(); PathAwareTargeting(); Determinism(); MissionsCheck(); Progression(); Training(); TechnologyAndUnlocks(); HeroSystem(); Balance(); LimitsAndDemolition(); ModelChecks();
+            Construction(); Economy(); Persistence(); Combat(); PathAwareTargeting(); Determinism(); MissionsCheck(); Progression(); Training(); TechnologyAndUnlocks(); HeroSystem(); EquipmentSystem(); Balance(); LimitsAndDemolition(); ModelChecks();
             Console.WriteLine("\n" + count + " checks passed in " + watch.Elapsed.TotalSeconds.ToString("F2") + "s."); return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -51,6 +51,12 @@ internal static class CoreTests
         Check(s.CanMoveWallRow(wallIds, middleWall.Id, 6, 28), "Wall row previews a valid translated footprint");
         Check(s.MoveWallRow(wallIds, middleWall.Id, 6, 28) && row[0].Z == 28 && row[2].Z == 28, "Wall row moves atomically while retaining its shape");
         Check(!s.MoveWallRow(wallIds, middleWall.Id, 18, 16) && row[1].X == 6 && row[1].Z == 28, "Blocked wall-row move preserves every segment");
+        List<int> stroke = new List<int> { row[0].Id };
+        Check(s.ExtendWallStroke(stroke, row[2].Id) && stroke.Count == 3 && stroke[1] == row[1].Id, "Wall stroke fills skipped contiguous segments on one axis");
+        Check(s.Build(BuildingKind.Wall, 6, 29), "Build a perpendicular wall branch");
+        Check(!s.ExtendWallStroke(stroke, s.Village.At(6, 29).Id) && stroke.Count == 3, "Wall stroke cannot turn a corner");
+        Check(s.Build(BuildingKind.Wall, 9, 28), "Build a wall beyond a gap");
+        Check(!s.ExtendWallStroke(stroke, s.Village.At(9, 28).Id) && stroke.Count == 3, "Wall stroke stops at gaps");
         List<int> allBuildingIds = new List<int>(); foreach (Building building in s.Village.Buildings) allBuildingIds.Add(building.Id);
         int keepX = s.Find(1).X, keepZ = s.Find(1).Z;
         Check(s.CanMoveGroup(allBuildingIds, -3, 2), "Formation editor previews a valid whole-layout translation");
@@ -166,6 +172,7 @@ internal static class CoreTests
         Check(read.Buildings.Count == v.Buildings.Count && read.Gold == v.Gold, "Save roundtrip preserves settlement");
         string oldBalancePath = Path.Combine(directory, "old-arc-tower.xml");
         VillageData oldBalance = VillageData.Create();
+        oldBalance.Version = 2;
         oldBalance.Add(BuildingKind.ArcTower, 30, 30);
         SaveStore.Save(oldBalancePath, oldBalance);
         System.Xml.XmlDocument oldBalanceXml = new System.Xml.XmlDocument();
@@ -298,12 +305,82 @@ internal static class CoreTests
         Check(frozen.CastFreeze(frozenTower.CenterX, frozenTower.CenterZ), "Freeze accepts a live defense target");
         for (int i = 0; i < 30; i++) frozen.Step();
         Check(frozen.Units[0].Health == beforeFreeze, "Frozen defense cannot attack during the effect");
+        for (int i = 0; i < 90; i++) frozen.Step();
+        Check(frozen.Buildings[0].FrozenTicks > 0 && frozen.Units[0].Health == beforeFreeze,
+            "Freeze persists beyond the old short animation and keeps its defense inactive");
+        for (int i = 0; i < 22; i++) frozen.Step();
+        Check(frozen.SpellZones.Count == 0 && frozen.Buildings[0].FrozenTicks == 0,
+            "Freeze field expires and the defense is allowed to resume");
+
+        Building zoneKeep = new Building { Id = 31, X = 30, Z = 30, Kind = BuildingKind.Keep }; zoneKeep.Health = zoneKeep.MaxHealth;
+        Battle zones = new Battle(new List<Building> { zoneKeep }, 0, new[] { 1, 0, 0, 0 });
+        zones.Deploy(TroopKind.Vanguard, 500, 500);
+        Unit lateEntry = zones.Units[0]; lateEntry.Health = 1;
+        Check(zones.CastHeal(20500, 20500) && lateEntry.Health == 1, "Heal may be placed before allies enter its area");
+        lateEntry.X = lateEntry.Z = 20500;
+        for (int i = 0; i < 22; i++) { lateEntry.X = lateEntry.Z = 20500; zones.Step(); }
+        Check(lateEntry.Health > 1 && zones.SpellZones.Count == 1,
+            "A unit entering the heal field receives a later healing pulse");
+        lateEntry.X = lateEntry.Z = 500;
+        Check(zones.CastFury(20500, 20500) && lateEntry.FuryTicks == 0, "Fury may be placed before troops arrive");
+        lateEntry.X = lateEntry.Z = 20500; zones.Step();
+        Check(lateEntry.FuryTicks > 0, "Troops entering an active fury field gain the buff");
+        lateEntry.X = lateEntry.Z = 500;
+        for (int i = 0; i < 3; i++) zones.Step();
+        Check(lateEntry.FuryTicks == 0, "Fury does not follow troops after they leave its field");
+        zones.Finish();
+        bool lingeringSpellVisual = false;
+        foreach (CombatEffect effect in zones.Effects)
+            if ((effect.Kind == 3 || effect.Kind == 7 || effect.Kind == 8) && effect.Ticks > 0) lingeringSpellVisual = true;
+        Check(zones.SpellZones.Count == 0 && !lingeringSpellVisual, "Battle result clears active spell fields and visuals");
         Battle timeout = new Battle(0); timeout.Deploy(TroopKind.Vanguard, 500, 500);
         for (int i = 0; i < 3600; i++) timeout.Step();
         Check(timeout.Finished, "A started battle always terminates by deadline");
     }
     private static void PathAwareTargeting()
     {
+        Building openTarget = new Building { Id = 1000, Kind = BuildingKind.Mine, X = 14, Z = 14 };
+        openTarget.Health = openTarget.MaxHealth;
+        Building[,] openGrid = new Building[Rules.MapSize, Rules.MapSize];
+        List<Cell> direct = Pathfinder.Find(openGrid, 10, 10, openTarget, Rules.Spec(TroopKind.Vanguard).Range, false);
+        Check(direct.Count > 0 && direct[0].X == 11 && direct[0].Z == 11,
+            "Ground troops take a diagonal first step across unobstructed ground");
+        Building[,] cornerGrid = new Building[Rules.MapSize, Rules.MapSize];
+        Building cornerEast = new Building { Id = 1001, Kind = BuildingKind.Wall, X = 11, Z = 10 };
+        Building cornerNorth = new Building { Id = 1002, Kind = BuildingKind.Wall, X = 10, Z = 11 };
+        cornerEast.Health = cornerEast.MaxHealth; cornerNorth.Health = cornerNorth.MaxHealth;
+        cornerGrid[11, 10] = cornerEast; cornerGrid[10, 11] = cornerNorth;
+        List<Cell> cornerRoute = Pathfinder.Find(cornerGrid, 10, 10, openTarget, Rules.Spec(TroopKind.Vanguard).Range, false);
+        Check(cornerRoute.Count > 0 && (cornerRoute[0].X != 11 || cornerRoute[0].Z != 11),
+            "Diagonal movement cannot slip between two intact wall corners");
+
+        Building walledTarget = new Building { Id = 1100, Kind = BuildingKind.Mine, X = 15, Z = 20 };
+        walledTarget.Health = walledTarget.MaxHealth;
+        List<Building> frontage = new List<Building> { walledTarget };
+        for (int z = 16; z <= 24; z++)
+        {
+            Building wall = new Building { Id = 1101 + z, Kind = BuildingKind.Wall, X = 12, Z = z };
+            wall.Health = wall.MaxHealth; frontage.Add(wall);
+        }
+        Battle front = new Battle(frontage, 0, new[] { 1, 0, 0, 0, 0, 0, 0, 0 });
+        Check(front.Deploy(TroopKind.Vanguard, 10500, 20500), "Wall-front test deploys a ground soldier");
+        front.Step();
+        Cell breachCell = new Cell(-1, -1);
+        foreach (Cell waypoint in front.Units[0].Path)
+            if (waypoint.X == 12) { breachCell = waypoint; break; }
+        Check(breachCell.X == 12 && Math.Abs(breachCell.Z - 20) <= 1,
+            "Ground soldier breaches the nearby blocking wall instead of walking to the end of its row");
+        int firstWallTarget = -1;
+        for (int tick = 0; tick < 65 && firstWallTarget < 0; tick++)
+        {
+            front.Step();
+            foreach (Building wall in front.Buildings)
+                if (wall.Kind == BuildingKind.Wall && wall.Health < wall.MaxHealth)
+                { firstWallTarget = wall.Id; break; }
+        }
+        Check(firstWallTarget >= 0 && front.Units[0].TargetId == firstWallTarget,
+            "Blocking wall becomes the troop's visible active target while it attacks");
+
         Building nearBehindWall = new Building { Id = 1, Kind = BuildingKind.Mine, X = 15, Z = 19 };
         nearBehindWall.Health = nearBehindWall.MaxHealth;
         Building fartherOpen = new Building { Id = 2, Kind = BuildingKind.Mine, X = 10, Z = 27 };
@@ -551,9 +628,9 @@ internal static class CoreTests
         Building distantWall = new Building { Id = 802, Kind = BuildingKind.Wall, X = 14, Z = 20 }; distantWall.Health = distantWall.MaxHealth;
         Battle highSpells = new Battle(new List<Building> { spellTower, distantWall }, 0, new[] { 1, 0, 0, 0 }, null, new[] { 3, 3, 3, 3 });
         highSpells.Deploy(TroopKind.Vanguard, 10500, 15500);
-        Check(highSpells.CastFury(10500, 15500) && highSpells.Units[0].FuryTicks == 160, "Fury research increases its duration");
-        Check(highSpells.CastFreeze(spellTower.CenterX, spellTower.CenterZ) && highSpells.Buildings[0].FrozenTicks == 120,
-            "Freeze research increases its duration");
+        Check(highSpells.CastFury(10500, 15500) && highSpells.SpellZones[0].TicksLeft == Rules.SpellDurationTicks(SpellKind.Fury, 3), "Fury research increases the persistent field duration");
+        Check(highSpells.CastFreeze(spellTower.CenterX, spellTower.CenterZ) && highSpells.SpellZones[1].TicksLeft == Rules.SpellDurationTicks(SpellKind.Freeze, 3),
+            "Freeze research increases the persistent field duration");
         Check(highSpells.CastBreach(10000, 20500) && highSpells.Buildings[1].Health == 0, "Breach research increases its wall-breaking radius");
         Check(!session.ResearchTroop(TroopKind.Vanguard) && session.Village.TroopLevels[0] == 1, "Lab level one blocks level-two research");
         Building camp = null, lab = null;
@@ -578,7 +655,8 @@ internal static class CoreTests
             "Battle snapshots every troop and spell level");
         Check(session.Battle.Deploy(TroopKind.Vanguard, 500, 500) && session.Battle.Units[0].Health == Rules.TroopHealth(TroopKind.Vanguard, 2), "Researched health applies on deployment");
         session.Battle.Units[0].Health = 1;
-        Check(session.Battle.CastHeal(500, 500) && session.Battle.Units[0].Health > 1 + Rules.TroopHealth(TroopKind.Vanguard, 2) * 2 / 3, "Researched heal restores more than base spell");
+        Check(session.Battle.CastHeal(500, 500) && session.Battle.Units[0].Health > 1
+            && session.Battle.SpellZones[0].TicksLeft == Rules.SpellDurationTicks(SpellKind.Heal, 2), "Researched heal starts a longer persistent field");
 
         VillageData legacy = VillageData.Create();
         legacy.Version = 1;
@@ -591,7 +669,7 @@ internal static class CoreTests
         System.Xml.XmlNode spellNode = legacyXml.SelectSingleNode("/VillageData/SpellLevels"); if (spellNode != null) spellNode.ParentNode.RemoveChild(spellNode);
         legacyXml.Save(path);
         string message; VillageData migrated = SaveStore.Load(path, out message);
-        Check(migrated.Version == 2 && migrated.TrainingCampLevel == 3 && migrated.LaboratoryLevel == 1, "Version-one save gains compatible camp and laboratory");
+        Check(migrated.Version == 3 && migrated.TrainingCampLevel == 3 && migrated.LaboratoryLevel == 1, "Version-one save gains compatible camp and laboratory");
         Check(migrated.SpellLevel(SpellKind.Heal) == 1 && !migrated.IsSpellUnlocked(SpellKind.Fury), "Legacy save gains safe default spell technology");
         Check(migrated.ArmyCounts[2] == 3 && migrated.ArmyCounts[3] == 4 && migrated.QueuedCount(TroopKind.Sapper) == 1 && migrated.IsTroopUnlocked(TroopKind.Sapper), "Legacy paid queue survives deserialization before session conversion");
         int migratedGold = migrated.Gold;
@@ -606,7 +684,7 @@ internal static class CoreTests
         foreach (string element in new[] { "ArmyInitialized", "ArmyCounts", "TrainingQueue", "TrainingStartedUtcTicks" }) preArmyXml = WithoutElement(preArmyXml, element);
         File.WriteAllText(preArmyPath, preArmyXml);
         VillageData preArmy = SaveStore.Load(preArmyPath, out message);
-        Check(preArmy.Version == 2 && preArmy.ArmyHousing == 45 && preArmy.TrainingCampLevel == 3, "Pre-army legacy save gains a playable starter roster after migration");
+        Check(preArmy.Version == 3 && preArmy.ArmyHousing == 45 && preArmy.TrainingCampLevel == 3, "Pre-army legacy save gains a playable starter roster after migration");
 
         GameSession paused = NewSession(); DateTime trainingStart = DateTime.UtcNow;
         paused.DismissTroop(TroopKind.Vanguard);
@@ -670,6 +748,7 @@ internal static class CoreTests
         Check(session.Village.Limit(BuildingKind.HeroHall) == 0 && !session.Build(BuildingKind.HeroHall, 5, 5), "Hero hall remains locked before town hall four");
         Check(session.Upgrade(1) && session.Upgrade(1) && session.Upgrade(1) && session.Village.KeepLevel == 4, "Town hall can reach the hero tier");
         session.Village.Gold = session.Village.Crystal = session.Village.Capacity;
+        session.Village.CoreSigils = 1;
         Check(session.Build(BuildingKind.HeroHall, 5, 5) && session.Village.IsHeroUnlocked(HeroKind.EmberWarden), "Building the hero hall unlocks the first hero without training it as a troop");
         Building hall = null; foreach (Building building in session.Village.Buildings) if (building.Kind == BuildingKind.HeroHall) hall = building;
         int housing = session.Village.ArmyHousing;
@@ -688,9 +767,77 @@ internal static class CoreTests
         Unit hero = battle.Units[0], pet = battle.Units[1]; int maximum = battle.MaxHealth(hero); hero.Health = maximum / 2;
         Check(pet.IsPet && pet.BondedHeroUnitId == hero.Id && battle.MaxHealth(pet) == Rules.PetHealth(PetKind.CinderFox, 2), "Bound pet deploys with the hero as a separate combat unit");
         Check(hero.IsHero && hero.Health != battle.MaxHealth(TroopKind.Guardian) && battle.CastHeroSkill(HeroKind.EmberWarden) && hero.Health > maximum / 2 && hero.FuryTicks == 160, "Hero uses independent stats and its once-per-battle active skill");
+        Check(battle.Effects.Exists(effect => effect.Kind == 12 && effect.Ticks == hero.FuryTicks), "Hero command visual lasts as long as its damage buff");
         hero.Health = 0; battle.Step();
         Check(pet.Health > 0 && pet.BondedHeroUnitId == -1 && pet.TargetId >= 0 && battle.AliveCount >= 1, "Pet survives its hero and independently acquires an attack target");
         Check(!battle.CastHeroSkill(HeroKind.EmberWarden) && !battle.HeroAvailable(HeroKind.EmberWarden), "Hero and hero skill cannot be deployed repeatedly");
+        Building distantPetObjective = new Building { Id = 880, Kind = BuildingKind.Keep, X = 20, Z = 20 };
+        distantPetObjective.Health = distantPetObjective.MaxHealth;
+        Battle petRoute = new Battle(new List<Building> { distantPetObjective }, 0, noArmy, null, null,
+            new[] { 1 }, new[] { 1, 0 }, new[] { 0 });
+        Check(petRoute.DeployHeroNearest(HeroKind.EmberWarden, 500, 500), "Pet-route test deploys a bonded hero");
+        petRoute.Step();
+        List<Cell> initialPetPath = petRoute.Units[1].Path;
+        petRoute.Step();
+        Check(initialPetPath.Count > 0 && ReferenceEquals(initialPetPath, petRoute.Units[1].Path),
+            "Bonded pet keeps its route while the hero objective is unchanged");
         Check(session.Village.PetLevels.Count == 2 && session.Village.PetLevels[0] == 2 && session.Village.ArmyHousing == housing, "Pets persist independently and consume zero troop housing");
+    }
+    private static void EquipmentSystem()
+    {
+        GameSession s = NewSession();
+        Check(s.Village.CoreSigils == 0 && s.Village.Stardust == 0 && !s.ImproveEquipment(EquipmentKind.MarchTorch), "New village has no free equipment materials");
+        Check(s.Village.RecordMission(0, 1, 50) && s.Village.CoreSigils == 1, "First campaign milestone grants one core sigil");
+        s.Village.RecordMission(0, 1, 60);
+        Check(s.Village.CoreSigils == 1, "Repeating a campaign milestone cannot farm sigils");
+        s.Village.RecordMission(0, 3, 100);
+        Check(s.Village.Stardust == 60, "Crossing two and three stars grants two distinct stardust awards");
+        s.Village.RecordMission(0, 2, 100);
+        Check(s.Village.Stardust == 60, "Lower repeat result does not duplicate stardust");
+        s.Village.Gold = s.Village.Crystal = s.Village.Capacity;
+        Check(s.Upgrade(1) && s.Upgrade(1) && s.Upgrade(1), "Equipment fixture reaches town hall four");
+        s.Village.CoreSigils = 0;
+        Check(!s.Build(BuildingKind.HeroHall, 5, 5), "Hero hall requires a milestone sigil");
+        s.Village.CoreSigils = 1;
+        Check(s.Build(BuildingKind.HeroHall, 5, 5) && s.Village.CoreSigils == 0 && s.Village.HeroHallPermit, "First hero hall consumes a sigil exactly once");
+        Check(s.Village.EquipmentLevels[0] == 1 && s.Village.EquipmentLevels[1] == 1 && s.Village.HeroEquipmentSlots[0] == 0 && s.Village.HeroEquipmentSlots[1] == 1, "Hero receives two equipped starter items");
+        Check(!s.ImproveEquipment(EquipmentKind.MarchTorch) && s.Village.Stardust == 60, "Insufficient dust rejects crafting atomically");
+        s.Village.Stardust = 200;
+        Check(s.ImproveEquipment(EquipmentKind.MarchTorch) && s.Village.EquipmentLevels[2] == 1 && s.Village.Stardust == 100, "Crafting consumes exact materials");
+        Check(!s.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.RiftHammer), "Same item cannot occupy two slots");
+        Check(s.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.MarchTorch) && s.EquipHero(HeroKind.EmberWarden, 1, EquipmentKind.EmberChalice) == false, "Only crafted items can be equipped");
+        s.BeginBattle();
+        Check(s.Battle != null && s.Battle.EquipmentLevels[2] == 1 && s.Battle.HeroEquipmentSlots[0] == 2, "Battle snapshots equipped items");
+        Check(!s.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.HearthShield) && !s.ImproveEquipment(EquipmentKind.MarchTorch), "Home equipment cannot change during battle");
+        Check(s.Battle.DeployHeroNearest(HeroKind.EmberWarden, 500, 500), "Equipped hero deploys");
+        Unit hero = s.Battle.Units[0];
+        Check(s.Battle.CastHeroSkill(HeroKind.EmberWarden) && hero.FuryTicks == 180, "Level-one torch extends command to nine seconds");
+        s.ReturnHome();
+        Check(s.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.HearthShield), "Equipment can be replaced after battle");
+        Battle shieldBattle = new Battle(Missions.Create(0), 0, new int[Rules.Troops.Length], null, null, new[] { 1 }, null, null, new[] { 1, 1, 0, 0 }, new[] { 0, 1 });
+        shieldBattle.DeployHeroNearest(HeroKind.EmberWarden, 500, 500);
+        System.Reflection.MethodInfo mitigation = typeof(Battle).GetMethod("MitigateDefenseDamage", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Check((int)mitigation.Invoke(shieldBattle, new object[] { shieldBattle.Units[0], 100 }) == 80, "Shield reduces direct and splash defense damage through one rule");
+        Battle hammerBattle = new Battle(Missions.Create(0), 0, new int[Rules.Troops.Length], null, null, new[] { 1 }, null, null, new[] { 0, 1, 0, 0 }, new[] { 1, -1 });
+        hammerBattle.DeployHeroNearest(HeroKind.EmberWarden, 500, 500);
+        Building targetWall = hammerBattle.Buildings.Find(b => b.Kind == BuildingKind.Wall); targetWall.Health = 10000;
+        System.Reflection.MethodInfo attack = typeof(Battle).GetMethod("Attack", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        attack.Invoke(hammerBattle, new object[] { hammerBattle.Units[0], targetWall });
+        Check(targetWall.Health == 10000 - Rules.HeroDamage(HeroKind.EmberWarden, 1) * 2, "Level-one hammer doubles hero wall damage");
+        Battle chaliceBattle = new Battle(Missions.Create(0), 0, new int[Rules.Troops.Length], null, null, new[] { 1 }, null, null, new[] { 0, 0, 0, 1 }, new[] { 3, -1 });
+        chaliceBattle.DeployHeroNearest(HeroKind.EmberWarden, 500, 500);
+        Unit ally = new Unit { Kind = TroopKind.Vanguard, X = chaliceBattle.Units[0].X + 1000, Z = chaliceBattle.Units[0].Z, Health = 1 };
+        chaliceBattle.Units.Add(ally);
+        Check(chaliceBattle.CastHeroSkill(HeroKind.EmberWarden) && ally.Health == 1 + chaliceBattle.MaxHealth(ally) * 15 / 100, "Level-one chalice heals nearby living allies on command");
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "equipment.xml");
+        SaveStore.Save(path, s.Village);
+        string message; VillageData restored = SaveStore.Load(path, out message);
+        Check(restored.Version == 3 && restored.EquipmentLevels[2] == 1 && restored.HeroEquipmentSlots[0] == 0 && restored.HeroHallPermit, "Equipment and permit survive save roundtrip");
+        VillageData old = s.Village.CopyForSave(); old.Version = 2; old.EquipmentLevels.Clear(); old.HeroEquipmentSlots.Clear(); old.HeroHallPermit = false;
+        old.CampaignStars[3] = 3;
+        string legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestData", Guid.NewGuid().ToString("N"), "equipment-v2.xml");
+        SaveStore.Save(legacyPath, old);
+        VillageData migrated = SaveStore.Load(legacyPath, out message);
+        Check(migrated.Version == 3 && migrated.HeroHallPermit && migrated.EquipmentLevels[0] == 1 && migrated.HeroEquipmentSlots[1] == 1 && migrated.CoreSigils == 1, "Version-two village migrates paid hall and chapter awards without losing the hero");
     }
 }

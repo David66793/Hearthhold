@@ -8,14 +8,14 @@ using UnityEngine.Rendering;
 namespace Hearthhold.UnityClient
 {
     // Unity prefers the bright KayKit CC0 models and retains shared procedural geometry as a safe fallback.
-    public sealed class ModelViews
+    public sealed partial class ModelViews
     {
         private readonly Dictionary<string, Mesh> meshes = new Dictionary<string, Mesh>();
         private readonly Dictionary<Texture2D, Material> spriteMaterials = new Dictionary<Texture2D, Material>();
         private readonly Dictionary<Texture2D, Material> externalTextureMaterials = new Dictionary<Texture2D, Material>();
         private readonly HashSet<string> loadedExternalResources = new HashSet<string>();
         private readonly Dictionary<int, Material> levelMaterials = new Dictionary<int, Material>();
-        private Material material, contactShadowMaterial;
+        private Material material, contactShadowMaterial, foxVertexMaterial;
         private Mesh contactShadowMesh;
         public GameObject Building(Building building, Transform parent)
         {
@@ -27,6 +27,7 @@ namespace Hearthhold.UnityClient
             if (root == null) root = Create(key, ModelFactory.Building(building.Kind, building.Level), parent);
             else ApplyExternalTexture(root, "ThirdParty/KayKitMedieval/KayKitMedieval_Texture");
             AddBuildingLevelArt(root, building.Kind, building.Level);
+            if (building.Kind == BuildingKind.Keep) AddKeepSculpt(root, building.Level);
             if (building.Kind == BuildingKind.Wall) AlignWallToCell(root);
             if (building.Kind == BuildingKind.ArcTower) AddStormMechanism(root);
             root.name = building.Spec.Name + " #" + building.Id;
@@ -42,27 +43,30 @@ namespace Hearthhold.UnityClient
         }
         public GameObject Troop(Unit unit, Transform parent, int level = 1)
         {
-            GameObject root = unit.IsPet ? Create("pet:" + unit.PetKind, ModelFactory.Pet(unit.PetKind), parent)
+            GameObject root = unit.IsPet && unit.PetKind == PetKind.CinderFox ? CreateCinderFoxSculpt(parent)
+                : unit.IsPet && unit.PetKind == PetKind.Mossback ? CreateMossbackSculpt(parent)
+                : unit.IsPet ? Create("pet:" + unit.PetKind, ModelFactory.Pet(unit.PetKind), parent)
                 : CreateExternal("troop:" + unit.Kind, TroopArt(unit.Kind), 1.38f, Vector3.zero, parent);
             bool authoredTroop = !unit.IsPet && root != null && UsesAuthoredRig(unit.Kind);
             if (root == null) root = Create("troop:" + unit.Kind, ModelFactory.Troop(unit.Kind), parent);
             else if (authoredTroop) ApplyRpgTextures(root, unit.Kind);
             else if (!unit.IsPet) ApplyExternalTexture(root, TroopTexture(unit.Kind));
             Bounds actorBounds = LocalBounds(root.transform);
-            if (!unit.IsPet && !authoredTroop) AddTroopRoleArt(root, unit.Kind);
-            if (!unit.IsPet && authoredTroop) AddAuthoredTroopLevelArt(root, unit.Kind, level, actorBounds);
-            else if (!unit.IsPet) AddTroopLevelArt(root, unit.Kind, level, actorBounds);
+            if (!unit.IsPet && !unit.IsHero && !authoredTroop) AddTroopRoleArt(root, unit.Kind);
+            if (!unit.IsPet && !unit.IsHero && authoredTroop && unit.Kind == TroopKind.Vanguard) AddVanguardSculpt(root, actorBounds);
+            if (!unit.IsPet && !unit.IsHero && authoredTroop) AddAuthoredTroopLevelArt(root, unit.Kind, level, actorBounds);
+            else if (!unit.IsPet && !unit.IsHero) AddTroopLevelArt(root, unit.Kind, level, actorBounds);
             if (unit.IsHero)
             {
                 root.transform.localScale *= 1.32f;
-                Ornament(root, "Hero mantle", PrimitiveType.Cube, new Vector3(0, actorBounds.min.y + actorBounds.size.y * 0.58f, -0.18f), new Vector3(0.86f, 0.68f, 0.12f), 0x8F352F);
-                Ornament(root, "Hero crest", PrimitiveType.Sphere, new Vector3(0, actorBounds.max.y + 0.13f, 0), new Vector3(0.28f, 0.18f, 0.28f), 0xFFD06A);
-                Ornament(root, "Hero core", PrimitiveType.Sphere, new Vector3(0, actorBounds.min.y + actorBounds.size.y * 0.62f, actorBounds.max.z + 0.05f), Vector3.one * 0.17f, 0xFF8B3D);
+                AddEmberWardenIdentity(root, level, actorBounds);
             }
-            if (unit.IsPet && level >= 2) Ornament(root, "Pet level crest", PrimitiveType.Sphere, new Vector3(0, actorBounds.max.y + 0.08f, 0), Vector3.one * (0.08f + level * 0.02f), 0xFFD06A);
+            if (unit.IsPet) AddPetIdentityUpgrade(root, unit.PetKind, level, actorBounds);
             root.name = unit.Spec.Name;
             AddContactShadow(root, 0.7f, 0.48f, new Vector3(0, 0.018f, 0));
             root.AddComponent<ModelActionAnimator>().Visual = root.transform.Find("3D model");
+            if (unit.IsPet && unit.PetKind == PetKind.CinderFox) root.AddComponent<CinderFoxArtAnimator>();
+            if (unit.IsPet && unit.PetKind == PetKind.Mossback) root.AddComponent<MossbackArtAnimator>();
             if (authoredTroop) root.AddComponent<ImportedClipAnimator>().Configure(TroopArt(unit.Kind), unit.Kind);
             else if (unit.Kind == TroopKind.Guardian || unit.Kind == TroopKind.SkyRider || unit.Kind == TroopKind.Alchemist
                 || unit.Kind == TroopKind.Medic || unit.Kind == TroopKind.Summoner)
@@ -76,6 +80,7 @@ namespace Hearthhold.UnityClient
             if (root == null) root = Create("building:" + kind + ":" + level, ModelFactory.Building(kind, level), parent);
             else ApplyExternalTexture(root, "ThirdParty/KayKitMedieval/KayKitMedieval_Texture");
             AddBuildingLevelArt(root, kind, level);
+            if (kind == BuildingKind.Keep) AddKeepSculpt(root, level);
             if (kind == BuildingKind.Wall) AlignWallToCell(root);
             if (kind == BuildingKind.ArcTower) AddStormMechanism(root);
             if (kind == BuildingKind.ArcTower)
@@ -149,6 +154,162 @@ namespace Hearthhold.UnityClient
             piece.GetComponent<Renderer>().sharedMaterial = LevelMaterial(color);
             Transform visual = root.transform.Find("3D model");
             if (visual != null) piece.transform.SetParent(visual, true);
+        }
+        private void AddKeepSculpt(GameObject root, int level)
+        {
+            // Sculpted, depth-bearing facade on top of the licensed FBX. No view-facing planes.
+            Bounds b = LocalBounds(root.transform);
+            float cx = b.center.x, cz = b.center.z, halfX = b.size.x * 0.32f, halfZ = b.size.z * 0.32f;
+            float ground = b.min.y;
+            int stone = 0xD9C8A5, deep = 0x34515A, brass = 0xBD9255;
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                {
+                    float px = cx + sx * halfX, pz = cz + sz * halfZ;
+                    Ornament(root, "Inset corner footing", PrimitiveType.Cube, new Vector3(px, ground + 0.13f, pz), new Vector3(0.36f, 0.26f, 0.36f), stone);
+                }
+            for (int i = -1; i <= 1; i++)
+            {
+                Ornament(root, "Front slate awning tooth", PrimitiveType.Cube,
+                    new Vector3(cx + i * halfX * 0.53f, ground + b.size.y * 0.48f, cz + halfZ * 0.96f),
+                    new Vector3(0.37f, 0.11f, 0.26f), deep);
+                Ornament(root, "Front engraved brass pin", PrimitiveType.Sphere,
+                    new Vector3(cx + i * halfX * 0.53f, ground + b.size.y * 0.49f, cz + halfZ * 1.04f),
+                    Vector3.one * 0.11f, brass);
+            }
+            Ornament(root, "Recessed entrance keystone", PrimitiveType.Cube,
+                new Vector3(cx, ground + 1.25f, cz + halfZ + 0.07f), new Vector3(0.42f, 0.32f, 0.16f), stone, new Vector3(0, 0, 45));
+            Ornament(root, "Inset hearth gem", PrimitiveType.Sphere,
+                new Vector3(cx, ground + 1.25f, cz + halfZ + 0.17f), Vector3.one * 0.18f, level >= 3 ? 0x79D8D1 : 0xE3A55B);
+            Debug.Log("HEARTHHOLD_ART_PROTOTYPE_KEEP_3D: level=" + level);
+        }
+        private void AddVanguardSculpt(GameObject root, Bounds body)
+        {
+            float shoulder = body.min.y + body.size.y * 0.72f;
+            float side = Mathf.Clamp(body.size.x * 0.31f, 0.22f, 0.36f);
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                string name = direction < 0 ? "Left 3D shoulder guard" : "Right 3D shoulder guard";
+                Ornament(root, name, PrimitiveType.Sphere,
+                    new Vector3(direction * side, shoulder, body.center.z), new Vector3(0.27f, 0.14f, 0.27f), 0xB99760);
+                AttachOrnamentToBone(root, name, direction < 0 ? "upperarm.l" : "upperarm.r");
+            }
+            Ornament(root, "Front brass clasp", PrimitiveType.Sphere,
+                new Vector3(0, body.min.y + body.size.y * 0.53f, body.max.z * 0.58f), Vector3.one * 0.14f, 0xD7B46C);
+            AttachOrnamentToBone(root, "Front brass clasp", "spine");
+            Debug.Log("HEARTHHOLD_ART_PROTOTYPE_VANGUARD_3D: imported rig with attached armor");
+        }
+        private static void AttachOrnamentToBone(GameObject root, string ornamentName, string boneSuffix)
+        {
+            Transform visual = root.transform.Find("3D model"), item = visual != null ? visual.Find(ornamentName) : null;
+            if (item == null) return;
+            foreach (Transform bone in visual.GetComponentsInChildren<Transform>())
+                if (bone.name.EndsWith(boneSuffix, System.StringComparison.OrdinalIgnoreCase))
+                { item.SetParent(bone, true); return; }
+        }
+        private GameObject CreateCinderFoxSculpt(Transform parent)
+        {
+            GameObject root = new GameObject("pet:CinderFox"); root.transform.SetParent(parent, false);
+            GameObject visual = new GameObject("3D model"); visual.transform.SetParent(root.transform, false);
+            int fur = 0xB95B3B, fire = 0xE58C4A, cream = 0xE8D5AD, shadow = 0x463D39, brass = 0xC6A36A;
+            Transform torso = new GameObject("Fox torso joint").transform; torso.SetParent(visual.transform, false); torso.localPosition = new Vector3(0, 0.62f, -0.12f);
+            SculptPart(torso, "Lean fox body", PrimitiveType.Sphere, Vector3.zero, new Vector3(0.60f, 0.48f, 1.06f), fur);
+            SculptPart(torso, "Raised shoulder ruff", PrimitiveType.Sphere, new Vector3(0, 0.11f, 0.31f), new Vector3(0.64f, 0.51f, 0.48f), fire);
+            SculptPart(torso, "Cream chest", PrimitiveType.Sphere, new Vector3(0, -0.08f, 0.50f), new Vector3(0.33f, 0.45f, 0.20f), cream);
+            SculptPart(torso, "Collar strap", PrimitiveType.Cube, new Vector3(0, 0.14f, 0.46f), new Vector3(0.46f, 0.10f, 0.17f), brass);
+            SculptPart(torso, "Collar ember", PrimitiveType.Sphere, new Vector3(0, 0.04f, 0.60f), Vector3.one * 0.12f, 0xFFD071);
+            Transform head = new GameObject("Fox head joint").transform; head.SetParent(visual.transform, false); head.localPosition = new Vector3(0, 0.94f, 0.49f);
+            SculptPart(head, "Fox cranium", PrimitiveType.Sphere, Vector3.zero, new Vector3(0.53f, 0.39f, 0.47f), fur);
+            SculptPart(head, "Tapered cheek silhouette", PrimitiveType.Sphere, new Vector3(0, -0.10f, 0.24f), new Vector3(0.46f, 0.27f, 0.42f), fire);
+            SculptPart(head, "Cream pointed muzzle", PrimitiveType.Capsule, new Vector3(0, -0.15f, 0.43f), new Vector3(0.27f, 0.25f, 0.40f), cream, new Vector3(90, 0, 0));
+            SculptPart(head, "Charcoal nose", PrimitiveType.Sphere, new Vector3(0, -0.12f, 0.68f), new Vector3(0.11f, 0.08f, 0.10f), shadow);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                SculptFoxEar(head, "Pointed fox ear", new Vector3(side * 0.22f, 0.20f, -0.10f), new Vector3(1, 1, 1), fur, side * -15f);
+                SculptFoxEar(head, "Inner ear", new Vector3(side * 0.22f, 0.23f, -0.005f), new Vector3(0.57f, 0.69f, 0.4f), cream, side * -15f);
+                SculptPart(head, "Dark eye socket", PrimitiveType.Sphere, new Vector3(side * 0.22f, 0.065f, 0.36f), new Vector3(0.13f, 0.10f, 0.075f), shadow);
+                SculptPart(head, "Amber eye", PrimitiveType.Sphere, new Vector3(side * 0.22f, 0.075f, 0.415f), new Vector3(0.075f, 0.075f, 0.045f), 0xF6CC7A);
+            }
+            for (int x = -1; x <= 1; x += 2)
+                for (int z = -1; z <= 1; z += 2)
+                {
+                    Transform leg = new GameObject((z > 0 ? "Front" : "Rear") + (x > 0 ? " right" : " left") + " fox leg joint").transform;
+                    leg.SetParent(visual.transform, false); leg.localPosition = new Vector3(x * 0.23f, 0.50f, z > 0 ? 0.27f : -0.45f);
+                    SculptPart(leg, "Tapered leg", PrimitiveType.Capsule, new Vector3(0, -0.23f, 0), new Vector3(0.16f, 0.38f, 0.17f), z > 0 ? fur : shadow);
+                    SculptPart(leg, "Paw", PrimitiveType.Sphere, new Vector3(0, -0.42f, 0.09f), new Vector3(0.19f, 0.10f, 0.25f), shadow);
+                }
+            Transform tail = new GameObject("Fox tail joint").transform; tail.SetParent(visual.transform, false); tail.localPosition = new Vector3(0, 0.67f, -0.58f);
+            SculptFoxTail(tail);
+            Debug.Log("HEARTHHOLD_ART_PROTOTYPE_PET_3D: articulated CinderFox");
+            return root;
+        }
+        private void SculptFoxEar(Transform parent, string name, Vector3 position, Vector3 scale, int color, float tilt)
+        {
+            Mesh ear;
+            if (!meshes.TryGetValue("fox:pointed-ear", out ear))
+            {
+                ear = new Mesh { name = "Pointed 3D fox ear" };
+                ear.vertices = new[] { new Vector3(-0.13f, 0, -0.08f), new Vector3(0.13f, 0, -0.08f),
+                    new Vector3(-0.13f, 0, 0.08f), new Vector3(0.13f, 0, 0.08f), new Vector3(0, 0.47f, 0.025f) };
+                ear.triangles = new[] { 0, 1, 4, 1, 3, 4, 3, 2, 4, 2, 0, 4, 0, 2, 1, 1, 2, 3 };
+                ear.RecalculateNormals(); meshes.Add("fox:pointed-ear", ear);
+            }
+            GameObject part = new GameObject(name); part.transform.SetParent(parent, false);
+            part.transform.localPosition = position; part.transform.localScale = scale;
+            part.transform.localRotation = Quaternion.Euler(0, 0, tilt);
+            part.AddComponent<MeshFilter>().sharedMesh = ear;
+            part.AddComponent<MeshRenderer>().sharedMaterial = LevelMaterial(color);
+        }
+        private void SculptFoxTail(Transform parent)
+        {
+            Mesh tail;
+            if (!meshes.TryGetValue("fox:tapered-tail", out tail))
+            {
+                var vertices = new List<Vector3>(); var colors = new List<Color32>(); var triangles = new List<int>();
+                float[] lengths = { 0, -0.25f, -0.50f, -0.81f, -1.10f, -1.32f, -1.43f };
+                float[] heights = { 0, 0.10f, 0.24f, 0.35f, 0.42f, 0.46f, 0.48f };
+                float[] radii = { 0.12f, 0.23f, 0.37f, 0.40f, 0.30f, 0.17f, 0.015f };
+                Color32[] palette = { new Color32(142, 64, 41, 255), new Color32(185, 91, 59, 255),
+                    new Color32(229, 140, 74, 255), new Color32(229, 140, 74, 255),
+                    new Color32(232, 213, 173, 255), new Color32(245, 227, 180, 255), new Color32(245, 227, 180, 255) };
+                for (int ring = 0; ring < lengths.Length; ring++)
+                for (int side = 0; side < 8; side++)
+                {
+                    float angle = side * Mathf.PI * 0.25f;
+                    vertices.Add(new Vector3(Mathf.Cos(angle) * radii[ring], heights[ring] + Mathf.Sin(angle) * radii[ring] * 0.81f, lengths[ring]));
+                    colors.Add(palette[ring]);
+                }
+                for (int ring = 0; ring < lengths.Length - 1; ring++)
+                for (int side = 0; side < 8; side++)
+                {
+                    int a = ring * 8 + side, b = (ring + 1) * 8 + side;
+                    int c = ring * 8 + (side + 1) % 8, d = (ring + 1) * 8 + (side + 1) % 8;
+                    triangles.Add(a); triangles.Add(b); triangles.Add(c);
+                    triangles.Add(c); triangles.Add(b); triangles.Add(d);
+                }
+                tail = new Mesh { name = "Tapered 3D fox tail" };
+                tail.SetVertices(vertices); tail.SetColors(colors); tail.SetTriangles(triangles, 0); tail.RecalculateNormals();
+                meshes.Add("fox:tapered-tail", tail);
+            }
+            if (foxVertexMaterial == null)
+            {
+                Shader shader = Shader.Find("Hearthhold/VertexLit");
+                if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
+                foxVertexMaterial = new Material(shader) { name = "Cinder Fox hand-painted tail" };
+            }
+            GameObject part = new GameObject("Sculpted tapering fire tail"); part.transform.SetParent(parent, false);
+            part.AddComponent<MeshFilter>().sharedMesh = tail;
+            part.AddComponent<MeshRenderer>().sharedMaterial = foxVertexMaterial;
+        }
+        private GameObject SculptPart(Transform parent, string name, PrimitiveType shape, Vector3 position, Vector3 scale, int color)
+        { return SculptPart(parent, name, shape, position, scale, color, Vector3.zero); }
+        private GameObject SculptPart(Transform parent, string name, PrimitiveType shape, Vector3 position, Vector3 scale, int color, Vector3 euler)
+        {
+            GameObject part = GameObject.CreatePrimitive(shape); part.name = name; part.transform.SetParent(parent, false);
+            part.transform.localPosition = position; part.transform.localRotation = Quaternion.Euler(euler); part.transform.localScale = scale;
+            Collider collider = part.GetComponent<Collider>(); if (collider != null) Object.Destroy(collider);
+            part.GetComponent<Renderer>().sharedMaterial = LevelMaterial(color);
+            return part;
         }
         private static void GroupOrnaments(GameObject root, string groupName, params string[] names)
         {
@@ -371,7 +532,6 @@ namespace Hearthhold.UnityClient
             if (level < 2) return;
             Bounds b = LocalBounds(root.transform);
             float cx = b.center.x, cz = b.center.z, top = b.max.y;
-            float edge = Mathf.Max(0.25f, Mathf.Min(b.size.x, b.size.z) * 0.32f);
             int bronze = kind == BuildingKind.Wall ? 0xC99A52 : 0xD6A543;
             if (kind == BuildingKind.Wall)
             {
@@ -388,50 +548,15 @@ namespace Hearthhold.UnityClient
                             Vector3.one * 0.2f, 0x62D7E1);
                 return;
             }
-            for (int sx = -1; sx <= 1; sx += 2)
-                for (int sz = -1; sz <= 1; sz += 2)
-                    Ornament(root, "Tier 2 grounded corner post", PrimitiveType.Cylinder,
-                        new Vector3(cx + sx * edge, 0.34f, cz + sz * edge), new Vector3(0.2f, 0.34f, 0.2f), bronze);
-            if (level < 3) return;
-            for (int sx = -1; sx <= 1; sx += 2)
-                for (int sz = -1; sz <= 1; sz += 2)
-                    Ornament(root, "Tier 3 corner gem", PrimitiveType.Sphere,
-                        new Vector3(cx + sx * edge, 0.76f, cz + sz * edge), Vector3.one * 0.25f, 0x62D7E1);
+            AddBuildingIdentityUpgrade(root, kind, level, b);
         }
         private void AddTroopLevelArt(GameObject root, TroopKind kind, int level, Bounds b)
         {
-            if (level < 2) return;
-            float y = b.min.y + b.size.y * 0.66f;
-            float side = Mathf.Clamp(b.size.x * 0.32f, 0.22f, 0.48f);
-            int color = kind == TroopKind.Medic || kind == TroopKind.Alchemist ? 0x64CFC6 : 0xD6A543;
-            Ornament(root, "Tier 2 left pauldron", PrimitiveType.Sphere, new Vector3(-side, y, 0), new Vector3(0.29f, 0.18f, 0.34f), color);
-            Ornament(root, "Tier 2 right pauldron", PrimitiveType.Sphere, new Vector3(side, y, 0), new Vector3(0.29f, 0.18f, 0.34f), color);
-            if (level < 3) return;
-            if (kind == TroopKind.Alchemist || kind == TroopKind.Medic || kind == TroopKind.Summoner)
-            {
-                Ornament(root, "Tier 3 arcane coat clasp", PrimitiveType.Sphere,
-                    new Vector3(0, b.min.y + b.size.y * 0.51f, 0.51f), Vector3.one * 0.24f, 0xF4D574);
-                return;
-            }
-            Ornament(root, "Tier 3 armor badge", PrimitiveType.Sphere,
-                new Vector3(0, b.min.y + b.size.y * 0.55f, 0.43f), Vector3.one * 0.27f, 0x62D7E1);
-            Ornament(root, "Tier 3 armored belt", PrimitiveType.Cube,
-                new Vector3(0, b.min.y + b.size.y * 0.38f, 0.33f), new Vector3(0.48f, 0.10f, 0.12f), 0xF4D574);
+            AddTroopIdentityUpgrade(root, kind, level, b);
         }
         private void AddAuthoredTroopLevelArt(GameObject root, TroopKind kind, int level, Bounds b)
         {
-            if (level < 2) return;
-            float y = b.min.y + b.size.y * 0.64f;
-            float side = Mathf.Clamp(b.size.x * 0.24f, 0.15f, 0.28f);
-            int color = kind == TroopKind.Medic ? 0x68D9C8 : kind == TroopKind.Summoner ? 0xC3A0F0
-                : kind == TroopKind.Ranger ? 0x82C875 : kind == TroopKind.Sapper ? 0xE99A61 : 0xE2B65E;
-            Ornament(root, "Tier 2 left enamel insignia", PrimitiveType.Sphere,
-                new Vector3(-side, y, 0), new Vector3(0.11f, 0.08f, 0.12f), color);
-            Ornament(root, "Tier 2 right enamel insignia", PrimitiveType.Sphere,
-                new Vector3(side, y, 0), new Vector3(0.11f, 0.08f, 0.12f), color);
-            if (level < 3) return;
-            Ornament(root, "Tier 3 small insignia clasp", PrimitiveType.Sphere,
-                new Vector3(0, b.min.y + b.size.y * 0.48f, b.max.z * 0.34f), Vector3.one * 0.14f, 0xE8C578);
+            AddTroopIdentityUpgrade(root, kind, level, b);
         }
         private static string BuildingArt(BuildingKind kind)
         {
@@ -741,6 +866,7 @@ namespace Hearthhold.UnityClient
             foreach (Mesh mesh in meshes.Values) Object.Destroy(mesh);
             meshes.Clear(); if (material != null) Object.Destroy(material);
             if (contactShadowMaterial != null) Object.Destroy(contactShadowMaterial);
+            if (foxVertexMaterial != null) Object.Destroy(foxVertexMaterial);
             if (contactShadowMesh != null) Object.Destroy(contactShadowMesh);
             foreach (Material spriteMaterial in spriteMaterials.Values) Object.Destroy(spriteMaterial);
             spriteMaterials.Clear();
@@ -757,11 +883,54 @@ namespace Hearthhold.UnityClient
         private void LateUpdate() { transform.rotation = Quaternion.Euler(45, 45, 0) * Quaternion.Euler(0, 0, RollDegrees); }
     }
 
+    // Every moving part belongs to a shaded 3D mesh; no camera-facing sprites are involved.
+    internal sealed class CinderFoxArtAnimator : MonoBehaviour
+    {
+        private Transform torso, head, tail;
+        private Transform[] legs;
+        private bool moving, dying;
+        private float phase, strike, death;
+        private void Awake()
+        {
+            Transform visual = transform.Find("3D model");
+            torso = visual.Find("Fox torso joint"); head = visual.Find("Fox head joint"); tail = visual.Find("Fox tail joint");
+            legs = new[] { visual.Find("Front left fox leg joint"), visual.Find("Front right fox leg joint"),
+                visual.Find("Rear left fox leg joint"), visual.Find("Rear right fox leg joint") };
+        }
+        public void SetMoving(bool value) { moving = value; }
+        public void Attack() { strike = 0.32f; }
+        public void Hit() { strike = Mathf.Max(strike, 0.12f); }
+        public void Die() { dying = true; }
+        private void Update()
+        {
+            if (torso == null || head == null || tail == null) return;
+            if (dying)
+            {
+                death += Time.deltaTime;
+                transform.Find("3D model").localRotation = Quaternion.Euler(0, 0, Mathf.Min(70f, death * 150f));
+                if (death > 0.75f) gameObject.SetActive(false);
+                return;
+            }
+            phase += Time.deltaTime * (moving ? 11f : 2.6f);
+            strike = Mathf.Max(0, strike - Time.deltaTime);
+            float lunge = strike > 0 ? Mathf.Sin((1f - strike / 0.32f) * Mathf.PI) : 0;
+            torso.localPosition = new Vector3(0, 0.62f + Mathf.Sin(phase * 2f) * (moving ? 0.035f : 0.012f), -0.12f + lunge * 0.23f);
+            torso.localRotation = Quaternion.Euler(lunge * -7f, 0, 0);
+            head.localRotation = Quaternion.Euler(lunge * 22f + Mathf.Sin(phase) * 3f, 0, 0);
+            tail.localRotation = Quaternion.Euler(-8f + Mathf.Sin(phase * 0.8f) * 11f - lunge * 13f, Mathf.Sin(phase * 0.5f) * 16f, 0);
+            for (int i = 0; i < legs.Length; i++) if (legs[i] != null)
+                legs[i].localRotation = Quaternion.Euler((moving ? Mathf.Sin(phase + (i == 0 || i == 3 ? 0 : Mathf.PI)) * 22f : 0)
+                    + (i < 2 ? lunge * -24f : lunge * 10f), 0, 0);
+        }
+    }
+
     // Moves the visible art on impact while the simulation and collider stay at their exact positions.
     internal sealed class ModelActionAnimator : MonoBehaviour
     {
         public Transform Visual;
         private ArticulatedModelAnimator articulated;
+        private CinderFoxArtAnimator fox;
+        private MossbackArtAnimator mossback;
         private ImportedClipAnimator importedClips;
         private FixedIsometricBillboard billboard;
         private Vector3 restPosition, restScale, direction;
@@ -773,6 +942,8 @@ namespace Hearthhold.UnityClient
         {
             if (ready || Visual == null) return;
             articulated = GetComponent<ArticulatedModelAnimator>();
+            fox = GetComponent<CinderFoxArtAnimator>();
+            mossback = GetComponent<MossbackArtAnimator>();
             importedClips = GetComponent<ImportedClipAnimator>();
             restPosition = Visual.localPosition;
             restScale = Visual.localScale;
@@ -786,6 +957,8 @@ namespace Hearthhold.UnityClient
             EnsureReady();
             if (!ready) return;
             if (articulated != null) { articulated.Attack(targetWorld); return; }
+            if (fox != null) { fox.Attack(); return; }
+            if (mossback != null) { mossback.Attack(); return; }
             if (importedClips != null && importedClips.Attack()) return;
             direction = transform.InverseTransformDirection(targetWorld - transform.position);
             direction.y = 0;
@@ -798,6 +971,8 @@ namespace Hearthhold.UnityClient
             EnsureReady();
             if (!ready || attacking) return;
             if (articulated != null) { articulated.Hit(); return; }
+            if (fox != null) { fox.Hit(); return; }
+            if (mossback != null) { mossback.Hit(); return; }
             if (importedClips != null && importedClips.Hit()) return;
             direction = Vector3.forward;
             attacking = false; elapsed = 0; duration = 0.22f;
@@ -805,7 +980,7 @@ namespace Hearthhold.UnityClient
         private void Update()
         {
             if (!ready) EnsureReady();
-            if (articulated != null || importedClips != null && importedClips.IsPlayingAction) return;
+            if (articulated != null || fox != null || mossback != null || importedClips != null && importedClips.IsPlayingAction) return;
             if (!ready || duration <= 0) return;
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);

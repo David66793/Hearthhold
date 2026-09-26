@@ -7,8 +7,8 @@ namespace Hearthhold.Core
     // destroy a wall before taking the corresponding step. Ranged goals use footprints.
     public static class Pathfinder
     {
-        private static readonly int[] DX = { 1, 0, -1, 0 };
-        private static readonly int[] DZ = { 0, 1, 0, -1 };
+        private static readonly int[] DX = { 1, 0, -1, 0, 1, -1, -1, 1 };
+        private static readonly int[] DZ = { 0, 1, 0, -1, 1, 1, -1, -1 };
         private struct Entry
         {
             public int Id, Cost;
@@ -42,8 +42,14 @@ namespace Hearthhold.Core
             heap[parent] = last;
             return result;
         }
-        private static int StepCost(Building block, bool sapper)
-        { return 10 + (block != null && block.Health > 0 && block.Kind == BuildingKind.Wall ? sapper ? 12 : 65 : 0); }
+        private static int StepCost(Building block, bool sapper, bool diagonal)
+        { return (diagonal ? 14 : 10) + (block != null && block.Health > 0 && block.Kind == BuildingKind.Wall ? sapper ? 12 : 30 : 0); }
+        private static bool BlocksCorner(Building block) { return block != null && block.Health > 0; }
+        private static bool CanStepDiagonal(Building[,] occupied, int cx, int cz, int direction)
+        {
+            return direction < 4 || !BlocksCorner(occupied[cx + DX[direction], cz])
+                && !BlocksCorner(occupied[cx, cz + DZ[direction]]);
+        }
         // Full weighted-distance field lets target choice compare real approaches rather than straight-line distance.
         // Both this field and Find charge the same extra cost for a wall that must be broken.
         public static int[] Costs(Building[,] occupied, int sx, int sz, bool sapper)
@@ -60,13 +66,14 @@ namespace Hearthhold.Core
                 Entry current = Pop(heap);
                 if (current.Cost != costs[current.Id]) continue;
                 int cx = current.Id % n, cz = current.Id / n;
-                for (int d = 0; d < 4; d++)
+                for (int d = 0; d < DX.Length; d++)
                 {
                     int x = cx + DX[d], z = cz + DZ[d];
                     if (x < 0 || z < 0 || x >= n || z >= n) continue;
+                    if (!CanStepDiagonal(occupied, cx, cz, d)) continue;
                     Building block = occupied[x, z];
                     if (block != null && block.Health > 0 && block.Kind != BuildingKind.Wall) continue;
-                    int id = x + z * n, candidate = current.Cost + StepCost(block, sapper);
+                    int id = x + z * n, candidate = current.Cost + StepCost(block, sapper, d >= 4);
                     if (candidate >= costs[id]) continue;
                     costs[id] = candidate; Push(heap, new Entry(id, candidate));
                 }
@@ -110,15 +117,16 @@ namespace Hearthhold.Core
                 int cx = current % n, cz = current / n;
                 if (target.DistanceSquared(cx * 1000 + 500, cz * 1000 + 500) <= (long)range * range)
                 { found = current; break; }
-                for (int d = 0; d < 4; d++)
+                for (int d = 0; d < DX.Length; d++)
                 {
                     int x = cx + DX[d], z = cz + DZ[d];
                     if (x < 0 || z < 0 || x >= n || z >= n) continue;
+                    if (!CanStepDiagonal(occupied, cx, cz, d)) continue;
                     int id = x + z * n;
                     if (closed[id]) continue;
                     Building block = occupied[x, z];
                     if (block != null && block.Health > 0 && block.Kind != BuildingKind.Wall) continue;
-                    int candidate = costs[current] + StepCost(block, sapper);
+                    int candidate = costs[current] + StepCost(block, sapper, d >= 4);
                     if (candidate < costs[id]) { costs[id] = candidate; parents[id] = current; open.Add(id); }
                 }
             }
@@ -132,7 +140,8 @@ namespace Hearthhold.Core
         {
             int dx = Math.Max(target.X - x, Math.Max(0, x - target.X - target.Spec.Size));
             int dz = Math.Max(target.Z - z, Math.Max(0, z - target.Z - target.Spec.Size));
-            return Math.Max(0, dx + dz - (range + 999) / 1000 - 1) * 10;
+            // Chebyshev distance stays admissible with diagonal movement and a ranged goal.
+            return Math.Max(0, Math.Max(dx, dz) - (range + Rules.Scale - 1) / Rules.Scale - 1) * 10;
         }
     }
 }
