@@ -15,6 +15,7 @@ namespace Hearthhold.UnityClient
         private string modalHudKey;
         private bool modalHudDirty;
         private bool smokeHudBaseVerified, smokeModalVerified;
+        private bool smokeEquipmentInputVerified;
         private Button modalPressedButton, modalPendingButton, modalLastClickedButton;
         private int modalLastClickedFrame;
         private string campaignFeedback;
@@ -467,14 +468,47 @@ namespace Hearthhold.UnityClient
             int selected = Mathf.Clamp(selectedEquipmentKind, 0, Rules.EquipmentNames.Length - 1), current = village.EquipmentLevels[selected];
             ModalText(data, Rules.EquipmentNames[selected] + " · " + (current == 0 ? Rules.EquipmentEffect((EquipmentKind)selected, 1) : Rules.EquipmentEffect((EquipmentKind)selected, current)), 16, 289, 393, 46, 15);
             bool canEquip = heroLevel > 0 && current > 0 && village.HeroEquipmentSlots[1 - selectedEquipmentSlot] != selected && village.HeroEquipmentSlots[selectedEquipmentSlot] != selected;
-            ModalButton(data, "装配", 16, 339, 123, 34, delegate { if (session.EquipHero(HeroKind.EmberWarden, selectedEquipmentSlot, (EquipmentKind)selected)) Save(); }, canEquip);
-            ModalButton(data, "卸下", 150, 339, 123, 34, delegate { if (session.EquipHero(HeroKind.EmberWarden, selectedEquipmentSlot, null)) Save(); }, heroLevel > 0 && village.HeroEquipmentSlots[selectedEquipmentSlot] >= 0);
+            ModalButton(data, "装配", 16, 339, 123, 34, delegate { SaveEquipmentChange(session.EquipHero(HeroKind.EmberWarden, selectedEquipmentSlot, (EquipmentKind)selected)); }, canEquip);
+            ModalButton(data, "卸下", 150, 339, 123, 34, delegate { SaveEquipmentChange(session.EquipHero(HeroKind.EmberWarden, selectedEquipmentSlot, null)); }, heroLevel > 0 && village.HeroEquipmentSlots[selectedEquipmentSlot] >= 0);
             int gold = Rules.EquipmentGoldCost(current), dust = Rules.EquipmentDustCost(current);
             bool canImprove = heroLevel > 0 && current < 3 && village.HeroHallLevel > current && village.Gold >= gold && village.Stardust >= dust;
-            ModalButton(data, current == 0 ? "锻造" : "升级", 284, 339, 123, 34, delegate { if (session.ImproveEquipment((EquipmentKind)selected)) Save(); }, canImprove, true);
+            ModalButton(data, current == 0 ? "锻造" : "升级", 284, 339, 123, 34, delegate { SaveEquipmentChange(session.ImproveEquipment((EquipmentKind)selected)); }, canImprove, true);
             string gate = current >= 3 ? "已达最高等级" : village.HeroHallLevel <= current ? "需英雄殿堂 " + (current + 1) + " 级"
                 : village.Gold < gold || village.Stardust < dust ? "材料不足：" + gold + "金 / " + dust + "粉尘" : "消耗 " + gold + "金 / " + dust + "粉尘 · 即时";
             ModalText(data, gate, 16, 384, 393, 33, 15, HudMuted);
+        }
+
+        private void SaveEquipmentChange(bool changed)
+        {
+            if (!changed) return;
+            EnsureRosterPreviews();
+            modalHudDirty = true;
+            Save();
+        }
+
+        private IEnumerator VerifyEquipmentModalInputSmoke()
+        {
+            RefreshModalHud(); yield return new WaitForEndOfFrame();
+            if (!SmokeModalClick("裂垒锤  Lv.1") || selectedEquipmentKind != (int)EquipmentKind.RiftHammer)
+            { ModalSmokeFailure("select rift hammer"); yield break; }
+            RefreshModalHud(); yield return new WaitForEndOfFrame();
+            if (!SmokeModalClick("装配") || session.Village.HeroEquipmentSlots[0] != (int)EquipmentKind.RiftHammer
+                || !Previews.HeroHasEquipment(EquipmentKind.RiftHammer) || Previews.HeroHasEquipment(EquipmentKind.HearthShield))
+            { ModalSmokeFailure("equip rift hammer and refresh hero model"); yield break; }
+            RefreshModalHud(); yield return new WaitForEndOfFrame();
+            if (!SmokeModalClick("卸下") || session.Village.HeroEquipmentSlots[0] != -1 || Previews.HeroHasEquipment(EquipmentKind.RiftHammer))
+            { ModalSmokeFailure("unequip rift hammer and remove model"); yield break; }
+            RefreshModalHud(); yield return new WaitForEndOfFrame();
+            if (!SmokeModalClick("守炉盾  Lv.1") || selectedEquipmentKind != (int)EquipmentKind.HearthShield)
+            { ModalSmokeFailure("select hearth shield"); yield break; }
+            RefreshModalHud(); yield return new WaitForEndOfFrame();
+            if (!SmokeModalClick("装配") || session.Village.HeroEquipmentSlots[0] != (int)EquipmentKind.HearthShield
+                || !Previews.HeroHasEquipment(EquipmentKind.HearthShield))
+            { ModalSmokeFailure("restore hearth shield"); yield break; }
+            selectedEquipmentKind = (int)EquipmentKind.MarchTorch;
+            modalHudDirty = true;
+            Debug.Log("HEARTHHOLD_HERO_EQUIPMENT_INPUT_READY: mouse clicks equip, remove and restore visible gear.");
+            smokeEquipmentInputVerified = true;
         }
 
         private IEnumerator VerifyModalHudInputSmoke()

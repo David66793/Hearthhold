@@ -41,7 +41,7 @@ namespace Hearthhold.UnityClient
             if (building.Kind == BuildingKind.ArcTower) root.AddComponent<ArticulatedModelAnimator>().ConfigureStormTower();
             return root;
         }
-        public GameObject Troop(Unit unit, Transform parent, int level = 1)
+        public GameObject Troop(Unit unit, Transform parent, int level = 1, IList<int> equipmentSlots = null, IList<int> equipmentLevels = null)
         {
             GameObject root = unit.IsPet && unit.PetKind == PetKind.CinderFox ? CreateCinderFoxSculpt(parent)
                 : unit.IsPet && unit.PetKind == PetKind.Mossback ? CreateMossbackSculpt(parent)
@@ -56,10 +56,12 @@ namespace Hearthhold.UnityClient
             if (!unit.IsPet && !unit.IsHero && authoredTroop && unit.Kind == TroopKind.Vanguard) AddVanguardSculpt(root, actorBounds);
             if (!unit.IsPet && !unit.IsHero && authoredTroop) AddAuthoredTroopLevelArt(root, unit.Kind, level, actorBounds);
             else if (!unit.IsPet && !unit.IsHero) AddTroopLevelArt(root, unit.Kind, level, actorBounds);
+            bool heroHammerEquipped = false;
             if (unit.IsHero)
             {
                 root.transform.localScale *= 1.32f;
                 AddEmberWardenIdentity(root, level, actorBounds);
+                heroHammerEquipped = AddHeroEquipmentArt(root, unit.HeroKind, equipmentSlots, equipmentLevels, actorBounds);
             }
             if (unit.IsPet) AddPetIdentityUpgrade(root, unit.PetKind, level, actorBounds);
             root.name = unit.Spec.Name;
@@ -70,7 +72,7 @@ namespace Hearthhold.UnityClient
             if (authoredTroop) root.AddComponent<ImportedClipAnimator>().Configure(TroopArt(unit.Kind), unit.Kind);
             else if (unit.Kind == TroopKind.Guardian || unit.Kind == TroopKind.SkyRider || unit.Kind == TroopKind.Alchemist
                 || unit.Kind == TroopKind.Medic || unit.Kind == TroopKind.Summoner)
-                root.AddComponent<ArticulatedModelAnimator>().ConfigureTroop(unit.Kind);
+                root.AddComponent<ArticulatedModelAnimator>().ConfigureTroop(unit.Kind, heroHammerEquipped);
             return root;
         }
         public GameObject BuildingPreview(BuildingKind kind, int level, Transform parent)
@@ -96,10 +98,10 @@ namespace Hearthhold.UnityClient
             Unit unit = new Unit { Kind = kind };
             return Troop(unit, parent, level);
         }
-        public GameObject HeroPreview(HeroKind kind, int level, Transform parent)
+        public GameObject HeroPreview(HeroKind kind, int level, Transform parent, IList<int> equipmentSlots = null, IList<int> equipmentLevels = null)
         {
             Unit unit = new Unit { IsHero = true, HeroKind = kind, HeroLevel = level, Kind = TroopKind.Guardian };
-            return Troop(unit, parent, level);
+            return Troop(unit, parent, level, equipmentSlots, equipmentLevels);
         }
         public GameObject PetPreview(PetKind kind, int level, Transform parent)
         {
@@ -1128,15 +1130,20 @@ namespace Hearthhold.UnityClient
         private Transform leftArm, rightArm, leftLeg, rightLeg, head, staff, leftWing, rightWing, visual, rotor, core;
         private Quaternion leftArmRest, rightArmRest, leftLegRest, rightLegRest, headRest, staffRest, leftWingRest, rightWingRest;
         private Vector3 visualRestPosition;
+        private Quaternion visualRestRotation;
         private Vector3 coreRestScale;
-        private bool isTower, isMedic, moving, dying, attackLogged;
+        private bool isTower, isMedic, heavyHammer, moving, dying, attackLogged;
         private TroopKind role;
         private float actionTime = 10f, hitTime = 10f, deathTime, spin;
         private Vector3 targetDirection = Vector3.forward;
+        internal int HammerAttackCount { get; private set; }
+        internal float HammerPoseAngle { get; private set; }
+        internal float HammerPeakPoseAngle { get; private set; }
 
-        public void ConfigureTroop(TroopKind kind)
+        public void ConfigureTroop(TroopKind kind, bool hammerEquipped = false)
         {
             role = kind;
+            heavyHammer = hammerEquipped && kind == TroopKind.Guardian;
             isMedic = kind == TroopKind.Medic;
             leftArm = FindPart(transform, "upperarm.l"); rightArm = FindPart(transform, "upperarm.r");
             leftLeg = FindPart(transform, "upperleg.l"); rightLeg = FindPart(transform, "upperleg.r");
@@ -1149,7 +1156,7 @@ namespace Hearthhold.UnityClient
             leftWing = FindPart(transform, "Sky rider left wing joint");
             rightWing = FindPart(transform, "Sky rider right wing joint");
             visual = transform.Find("3D model");
-            if (visual != null) visualRestPosition = visual.localPosition;
+            if (visual != null) { visualRestPosition = visual.localPosition; visualRestRotation = visual.localRotation; }
             leftArmRest = Rotation(leftArm); rightArmRest = Rotation(rightArm);
             leftLegRest = Rotation(leftLeg); rightLegRest = Rotation(rightLeg);
             headRest = Rotation(head); staffRest = Rotation(staff);
@@ -1199,6 +1206,7 @@ namespace Hearthhold.UnityClient
             if (targetDirection.sqrMagnitude < 0.001f) targetDirection = Vector3.forward;
             targetDirection.Normalize();
             actionTime = 0;
+            if (heavyHammer) HammerAttackCount++;
             if (!isTower && !attackLogged) { attackLogged = true; Debug.Log("HEARTHHOLD_ARTICULATED_ATTACK_READY: " + role); }
         }
         public void Hit() { if (!dying) hitTime = 0; }
@@ -1226,14 +1234,33 @@ namespace Hearthhold.UnityClient
             float breath = dying ? 0 : Mathf.Sin(Time.time * 2.7f);
             float collapse = dying ? Mathf.SmoothStep(0, 1, Mathf.Clamp01(deathTime / 0.48f)) : 0;
             float castingArm = isMedic ? -67f : role == TroopKind.Alchemist ? -112f : role == TroopKind.Guardian ? -58f : -88f;
-            if (leftArm != null) leftArm.localRotation = leftArmRest * Quaternion.Euler(stride * 23f - cast * (role == TroopKind.Guardian ? 20f : 42f) + recoil * 28f + collapse * 50f, 0, breath * 3f - cast * 12f);
-            if (rightArm != null) rightArm.localRotation = rightArmRest * Quaternion.Euler(-stride * 23f + cast * castingArm + recoil * 34f + collapse * 58f, 0, cast * (isMedic ? -18f : -32f));
+            float hammerSwing = 0, hammerDrive = 0;
+            if (heavyHammer && !dying && actionTime < 0.72f)
+            {
+                if (actionTime < 0.15f) hammerSwing = Mathf.SmoothStep(0, 43f, actionTime / 0.15f);
+                else if (actionTime < 0.32f) hammerSwing = Mathf.SmoothStep(43f, -116f, (actionTime - 0.15f) / 0.17f);
+                else hammerSwing = Mathf.SmoothStep(-116f, 0, (actionTime - 0.32f) / 0.40f);
+                hammerDrive = Mathf.Clamp01((actionTime - 0.14f) / 0.18f) * (1f - Mathf.Clamp01((actionTime - 0.34f) / 0.38f));
+            }
+            HammerPoseAngle = heavyHammer ? hammerSwing : 0;
+            if (heavyHammer) HammerPeakPoseAngle = Mathf.Max(HammerPeakPoseAngle, Mathf.Abs(hammerSwing));
+            if (leftArm != null) leftArm.localRotation = leftArmRest * Quaternion.Euler(
+                stride * 23f - (heavyHammer ? cast * 30f : cast * (role == TroopKind.Guardian ? 20f : 42f))
+                + recoil * 28f + collapse * 50f, 0, breath * 3f - cast * 12f);
+            if (rightArm != null) rightArm.localRotation = rightArmRest * Quaternion.Euler(
+                -stride * 23f + (heavyHammer ? hammerSwing : cast * castingArm) + recoil * 34f + collapse * 58f,
+                0, heavyHammer ? -hammerDrive * 34f : cast * (isMedic ? -18f : -32f));
             if (leftLeg != null) leftLeg.localRotation = leftLegRest * Quaternion.Euler(-stride * 20f + (isSkyRider ? 16f : 0) + collapse * 48f, 0, 0);
             if (rightLeg != null) rightLeg.localRotation = rightLegRest * Quaternion.Euler(stride * 20f + (isSkyRider ? 16f : 0) + collapse * 58f, 0, 0);
             if (head != null) head.localRotation = headRest * Quaternion.Euler(-cast * 12f + recoil * 17f + collapse * 31f, breath * 4f + targetDirection.x * cast * 10f, recoil * 8f);
             if (staff != null) staff.localRotation = staffRest * Quaternion.Euler(
                 role == TroopKind.Alchemist ? -cast * 35f : -cast * 8f, 0,
                 breath * 3f + cast * (role == TroopKind.Guardian ? 18f : isMedic ? -18f : -22f) + collapse * 24f);
+            if (heavyHammer && visual != null)
+            {
+                visual.localPosition = visualRestPosition + Vector3.down * (hammerDrive * 0.09f);
+                visual.localRotation = visualRestRotation * Quaternion.Euler(hammerDrive * 8f, 0, -hammerDrive * 5f);
+            }
             if (isSkyRider)
             {
                 float flap = Mathf.Sin(Time.time * (moving ? 14f : 8f)) * 29f + cast * 31f;

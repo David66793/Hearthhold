@@ -173,8 +173,8 @@ namespace Hearthhold.Core
             if (hero == null) return false;
             hero.Health = Math.Min(MaxHealth(hero), hero.Health + MaxHealth(hero) * 30 / 100);
             int torch = EquippedLevel(kind, EquipmentKind.MarchTorch), chalice = EquippedLevel(kind, EquipmentKind.EmberChalice);
-            int furyTicks = torch > 0 ? (8 + torch) * Rules.TicksPerSecond : 160;
-            long furyRadius = torch > 0 ? 5500L + torch * 500L : 5000L;
+            int furyTicks = Rules.HeroCommandTicks(torch);
+            long furyRadius = Rules.HeroCommandRadius(torch);
             hero.FuryTicks = Math.Max(hero.FuryTicks, furyTicks);
             foreach (Unit unit in Units)
             {

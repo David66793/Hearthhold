@@ -6,9 +6,10 @@
 |---|---|---|---|
 | 第三方建筑模型 | `Resources/ThirdParty/KayKitMedieval/` | KayKit Medieval Hexagon Pack，CC0；当前建筑优先加载 | 保留用到的 FBX、贴图、许可证及 `.meta` |
 | 第三方角色模型 | `Resources/ThirdParty/QuaterniusRPG/`、`KayKitAdventurers/` | Quaternius RPG 和 KayKit Adventurers，CC0；按兵种映射到三维骨骼角色/动画 | 保留已引用子集及许可证；未使用原始包不导入 |
-| 项目程序化三维 | `Core/ModelGeometry.cs`、`Runtime/ModelViews.cs`、`Runtime/ModelIdentityArt.cs`、`Runtime/SpellIdentityEffects.cs`、`Runtime/DefenseIdentityEffects.cs` 等 | 项目代码生成墙体、逐对象等级饰件、战宠形体、法术及防御特效/回退模型；设计档案见 `docs/entities/` | 属于源码，不是可清理缓存 |
+| 项目程序化三维 | `Core/ModelGeometry.cs`、`Runtime/ModelViews.cs`、`Runtime/ModelIdentityArt.cs`、`Runtime/HeroEquipmentArt.cs`、`Runtime/SpellIdentityEffects.cs`、`Runtime/DefenseIdentityEffects.cs` 等 | 项目代码生成墙体、逐对象等级饰件、英雄装备、战宠形体、法术及防御特效/回退模型；设计档案见 `docs/entities/` | 属于源码，不是可清理缓存 |
 | 生成位图 | `Resources/GeneratedArt/` | 早期建筑图及兵种图集；`ModelViews.cs` 仍按名称加载作为回退显示 | 目前仍属运行时依赖；替换调用并验证后才能考虑移除 |
 | UI 位图 | `Resources/UI/ExpeditionEmblemV1.png` | 项目内的远征徽章位图，聚落 HUD 使用 | 按 UI 资产维护，勿与 FBX 混淆；原始生成记录待补 |
+| 程序合成音频 | `Runtime/RiftHammerAudio.cs` | 项目代码实时生成裂隙锤打墙音效，不含第三方录音文件 | 属于源码；后续替换成外部音效时须登记作者、许可与导入改动 |
 | 材质、Shader、URP 设置 | `Resources/*.mat`、`Shaders/`、`Settings/` | 工程内创建/配置；支撑当前渲染、特效和显示 | 属于工程源资产，保留 `.meta` |
 | 美术方向资料 | `docs/art/`、`docs/VISUAL-DIRECTION.md`、`docs/ART-VERTICAL-SLICE-3D.md` | 对照图、目标画风及 3D 验收说明 | 保留作为设计依据，不放入运行时资源 |
 

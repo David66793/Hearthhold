@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using Hearthhold.Core;
 using UnityEngine;
@@ -18,11 +19,13 @@ namespace Hearthhold.UnityClient
         private int placementPreviewLevel;
         private Transform effectsRoot, deploymentRoot;
         private Mesh ringMesh;
+        private Mesh heroCommandRingMesh;
         private int troopActionsPresented, defenseActionsPresented;
 
         private void InitializePresentation()
         {
             ringMesh = MakeRingMesh();
+            heroCommandRingMesh = MakeRingMesh(0.478f);
             tileOutlineMesh = MakeTileOutlineMesh();
             selectionMarker = Ring("Selected building", Gold, transform);
             selectionMarker.SetActive(false);
@@ -42,7 +45,7 @@ namespace Hearthhold.UnityClient
             deploymentRoot.gameObject.SetActive(false);
         }
 
-        private Mesh MakeRingMesh()
+        private Mesh MakeRingMesh(float innerRadius = 0.41f)
         {
             const int segments = 48;
             Vector3[] vertices = new Vector3[segments * 2];
@@ -53,7 +56,7 @@ namespace Hearthhold.UnityClient
                 float angle = i * Mathf.PI * 2 / segments;
                 Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
                 vertices[i * 2] = direction * 0.5f;
-                vertices[i * 2 + 1] = direction * 0.41f;
+                vertices[i * 2 + 1] = direction * innerRadius;
                 normals[i * 2] = normals[i * 2 + 1] = Vector3.up;
                 int next = (i + 1) % segments, t = i * 6;
                 triangles[t] = i * 2; triangles[t + 1] = i * 2 + 1; triangles[t + 2] = next * 2;
@@ -202,6 +205,7 @@ namespace Hearthhold.UnityClient
         private void ResetBattlePresentation()
         {
             presentedEffects.Clear();
+            pendingHammerWallFinishes.Clear();
             troopActionsPresented = defenseActionsPresented = 0;
             if (effectsRoot != null) for (int i = effectsRoot.childCount - 1; i >= 0; i--) Destroy(effectsRoot.GetChild(i).gameObject);
             if (deploymentRoot != null) deploymentRoot.gameObject.SetActive(session.Battle != null);
@@ -237,9 +241,19 @@ namespace Hearthhold.UnityClient
                 else if (effect.Kind == 2)
                 {
                     AnimateUnitAttack(effect.X, effect.Z, end);
-                    SpawnPulse(end + Vector3.down, Ember, 0.2f, 0.95f, 0.16f);
-                    SpawnBurst(end, new Color32(255, 214, 126, 255), 4, 0.8f, 0.28f);
-                    FlashBuilding(effect.EndX, effect.EndZ, Danger);
+                    Unit hammerAttacker = FindRiftHammerWallAttacker(effect);
+                    if (hammerAttacker != null)
+                    {
+                        int finishingWallId = HoldFinishingHammerWall(effect);
+                        StartCoroutine(DelayedRiftHammerImpact(effect, end,
+                            BattleHeroEquipmentLevel(hammerAttacker.HeroKind, EquipmentKind.RiftHammer), finishingWallId));
+                    }
+                    else
+                    {
+                        SpawnPulse(end + Vector3.down, Ember, 0.2f, 0.95f, 0.16f);
+                        SpawnBurst(end, new Color32(255, 214, 126, 255), 4, 0.8f, 0.28f);
+                        FlashBuilding(effect.EndX, effect.EndZ, Danger);
+                    }
                 }
                 else if (effect.Kind == 3)
                 {
@@ -247,8 +261,11 @@ namespace Hearthhold.UnityClient
                 }
                 else if (effect.Kind == 4)
                 {
-                    SpawnDestruction(new Vector3(effect.X / 1000f, 0.3f, effect.Z / 1000f));
-                    FlashBuilding(effect.EndX, effect.EndZ, Ember);
+                    if (!IsFinishingHammerWall(effect.X, effect.Z))
+                    {
+                        SpawnDestruction(new Vector3(effect.X / 1000f, 0.3f, effect.Z / 1000f));
+                        FlashBuilding(effect.EndX, effect.EndZ, Ember);
+                    }
                 }
                 else if (effect.Kind == 5)
                 {
@@ -300,36 +317,205 @@ namespace Hearthhold.UnityClient
             foreach (Unit unit in session.Battle.Units)
                 if (unit.IsHero && unit.Health > 0 && unit.X == effect.X && unit.Z == effect.Z) { hero = unit; break; }
             if (hero == null || !unitViews.ContainsKey(hero.Id)) return;
+            int torchLevel = BattleHeroEquipmentLevel(hero.HeroKind, EquipmentKind.MarchTorch);
+            int chaliceLevel = BattleHeroEquipmentLevel(hero.HeroKind, EquipmentKind.EmberChalice);
+            float commandRadius = Rules.HeroCommandRadius(torchLevel) / 1000f;
             Transform heroRoot = unitViews[hero.Id].transform;
             GameObject aura = new GameObject("Hero command aura");
             aura.transform.SetParent(heroRoot, false);
             aura.transform.localPosition = Vector3.up * 0.12f;
             Transform outer = Ring("Ember command boundary", Ember, aura.transform).transform;
             Transform inner = Ring("Bronze command seal", Gold, aura.transform).transform;
+            outer.GetComponent<MeshFilter>().sharedMesh = heroCommandRingMesh;
+            inner.GetComponent<MeshFilter>().sharedMesh = heroCommandRingMesh;
             inner.localPosition = Vector3.up * 0.06f;
             Material auraMaterial = Resources.Load<Material>("SpellAura");
             if (auraMaterial != null)
             {
-                TintSpellRenderer(outer.GetComponent<Renderer>(), auraMaterial, Ember, 0.34f, 0f);
-                TintSpellRenderer(inner.GetComponent<Renderer>(), auraMaterial, Gold, 0.24f, 0f);
+                TintSpellRenderer(outer.GetComponent<Renderer>(), auraMaterial, Ember, 0.20f, 0f);
+                TintSpellRenderer(inner.GetComponent<Renderer>(), auraMaterial, Gold, 0.14f, 0f);
             }
             Transform[] embers = new Transform[8];
             for (int i = 0; i < embers.Length; i++)
                 embers[i] = Piece("Orbiting command ember", PrimitiveType.Sphere, Vector3.zero,
                     Vector3.one * (i % 2 == 0 ? 0.16f : 0.11f), i % 2 == 0 ? Ember : Gold, aura.transform).transform;
-            aura.AddComponent<HeroCommandVisual>().Configure(effect, outer, inner, embers);
+            aura.AddComponent<HeroCommandVisual>().Configure(effect, outer, inner, embers, commandRadius);
             Vector3 center = heroRoot.position + Vector3.up * 0.17f;
-            SpawnSoftPulse(center, Gold, 0.6f, 8f, 0.58f, 0.34f);
+            SpawnSoftPulse(center, Gold, 0.6f, commandRadius * 2f, 0.58f, 0.34f);
             SpawnSoftPulse(center + Vector3.up * 0.08f, Ember, 0.35f, 4.8f, 0.42f, 0.25f);
             SpawnBurst(center + Vector3.up * 1.15f, Ember, 12, 2.1f, 0.65f);
+            if (torchLevel > 0)
+                SpawnBurst(center + Vector3.up * 1.45f, Gold, 8 + torchLevel * 2, 1.3f, 0.72f);
             foreach (Unit ally in session.Battle.Units)
             {
-                if (ally.Id == hero.Id || ally.Health <= 0 || ally.FuryTicks <= 0) continue;
                 long dx = ally.X - hero.X, dz = ally.Z - hero.Z;
+                if (chaliceLevel > 0 && ally.Health > 0 && dx * dx + dz * dz <= 25000000L)
+                    SpawnChaliceRestoration(new Vector3(ally.X / 1000f, 0.16f, ally.Z / 1000f), chaliceLevel);
+                if (ally.Id == hero.Id || ally.Health <= 0 || ally.FuryTicks <= 0) continue;
                 if (dx * dx + dz * dz > 65000000L) continue;
                 SpawnPulse(new Vector3(ally.X / 1000f, 0.14f, ally.Z / 1000f), Gold, 0.2f, 1.7f, 0.4f);
             }
             Debug.Log("HEARTHHOLD_HERO_COMMAND_VISUAL_READY: following aura and allied activation pulses.");
+        }
+
+        private int BattleHeroEquipmentLevel(HeroKind hero, EquipmentKind equipment)
+        {
+            int start = (int)hero * 2, kind = (int)equipment;
+            if (session.Battle == null || start + 1 >= session.Battle.HeroEquipmentSlots.Length
+                || kind < 0 || kind >= session.Battle.EquipmentLevels.Length) return 0;
+            return session.Battle.HeroEquipmentSlots[start] == kind || session.Battle.HeroEquipmentSlots[start + 1] == kind
+                ? session.Battle.EquipmentLevels[kind] : 0;
+        }
+
+        private int riftHammerImpactsPresented, hearthShieldBlocksPresented, hammerWallFinishesCompleted;
+        private readonly HashSet<int> pendingHammerWallFinishes = new HashSet<int>();
+        private Unit FindRiftHammerWallAttacker(CombatEffect effect)
+        {
+            Unit attacker = null;
+            long nearestDistance = 1000001L;
+            foreach (Unit unit in session.Battle.Units)
+            {
+                if (unit.Health <= 0) continue;
+                long dx = unit.X - effect.X, dz = unit.Z - effect.Z, distance = dx * dx + dz * dz;
+                if (distance < nearestDistance) { nearestDistance = distance; attacker = unit; }
+            }
+            if (attacker == null || !attacker.IsHero || BattleHeroEquipmentLevel(attacker.HeroKind, EquipmentKind.RiftHammer) <= 0) return null;
+            bool wall = false;
+            foreach (Building building in session.Battle.Buildings)
+                if (building.Kind == BuildingKind.Wall && building.CenterX == effect.EndX && building.CenterZ == effect.EndZ)
+                { wall = true; break; }
+            return wall ? attacker : null;
+        }
+
+        private int HoldFinishingHammerWall(CombatEffect effect)
+        {
+            foreach (Building building in session.Battle.Buildings)
+            {
+                if (building.Kind != BuildingKind.Wall || building.Health > 0
+                    || building.CenterX != effect.EndX || building.CenterZ != effect.EndZ) continue;
+                pendingHammerWallFinishes.Add(building.Id);
+                GameObject view;
+                if (buildingViews.TryGetValue(building.Id, out view) && view != null) view.SetActive(true);
+                return building.Id;
+            }
+            return -1;
+        }
+
+        private bool IsFinishingHammerWall(int x, int z)
+        {
+            foreach (Building building in session.Battle.Buildings)
+                if (building.Kind == BuildingKind.Wall && building.CenterX == x && building.CenterZ == z
+                    && pendingHammerWallFinishes.Contains(building.Id)) return true;
+            return false;
+        }
+
+        private IEnumerator DelayedRiftHammerImpact(CombatEffect effect, Vector3 end, int level, int finishingWallId)
+        {
+            // The simulation applies damage immediately; presentation waits for the hammer's downstroke.
+            Battle originatingBattle = session.Battle;
+            yield return new WaitForSeconds(0.30f);
+            if (session.Battle != originatingBattle || effectsRoot == null
+                || finishingWallId >= 0 && !pendingHammerWallFinishes.Contains(finishingWallId))
+            {
+                pendingHammerWallFinishes.Remove(finishingWallId);
+                yield break;
+            }
+            SpawnRiftHammerImpact(effect, end, level);
+            FlashBuilding(effect.EndX, effect.EndZ, Danger);
+            if (finishingWallId >= 0)
+            {
+                SpawnDestruction(new Vector3(effect.EndX / 1000f, 0.3f, effect.EndZ / 1000f));
+                yield return new WaitForSeconds(0.08f);
+                pendingHammerWallFinishes.Remove(finishingWallId);
+                GameObject broken;
+                if (buildingViews.TryGetValue(finishingWallId, out broken) && broken != null) broken.SetActive(false);
+                hammerWallFinishesCompleted++;
+                Debug.Log("HEARTHHOLD_HAMMER_WALL_FINISH_READY: wall visual removed after downstroke impact.");
+            }
+        }
+
+        private void SpawnRiftHammerImpact(CombatEffect effect, Vector3 end, int level)
+        {
+            Vector3 approach = new Vector3(effect.X / 1000f - end.x, 0, effect.Z / 1000f - end.z);
+            if (approach.sqrMagnitude > 0.001f) end += approach.normalized * 0.66f;
+            Vector3 cameraFacing = -worldCamera.transform.forward;
+            cameraFacing.y = 0;
+            if (cameraFacing.sqrMagnitude > 0.001f)
+            {
+                cameraFacing.Normalize();
+                end += cameraFacing * 0.72f;
+            }
+            Vector3 ground = new Vector3(end.x, 0.15f, end.z);
+            SpawnSoftPulse(ground, new Color32(194, 169, 113, 255), 0.35f, 2.15f, 0.42f, 0.30f);
+            SpawnBurst(end, new Color32(242, 199, 112, 255), 9, 1.7f, 0.52f);
+            GameObject fracture = new GameObject("Rift hammer wall fracture");
+            fracture.transform.SetParent(effectsRoot, false);
+            fracture.transform.position = end + Vector3.up * 0.22f;
+            // The fracture is built from lit 3D bars, but its broad face should stay readable
+            // from the fixed isometric camera even when the hero attacks a different wall axis.
+            if (cameraFacing.sqrMagnitude > 0.001f) fracture.transform.rotation = Quaternion.LookRotation(cameraFacing.normalized);
+            GameObject spine = Piece("Rift fracture bright spine", PrimitiveType.Cube,
+                new Vector3(0, 0.18f, 0), new Vector3(0.20f, 1.28f, 0.13f),
+                new Color32(251, 245, 198, 255), fracture.transform);
+            spine.transform.localRotation = Quaternion.Euler(0, 0, 17f);
+            GameObject leftBranch = Piece("Rift fracture left branch", PrimitiveType.Cube,
+                new Vector3(-0.37f, 0.22f, 0), new Vector3(0.82f, 0.16f, 0.13f),
+                new Color32(242, 190, 102, 255), fracture.transform);
+            leftBranch.transform.localRotation = Quaternion.Euler(0, 0, 29f);
+            GameObject rightBranch = Piece("Rift fracture right branch", PrimitiveType.Cube,
+                new Vector3(0.38f, -0.18f, 0), new Vector3(0.76f, 0.16f, 0.13f),
+                new Color32(242, 190, 102, 255), fracture.transform);
+            rightBranch.transform.localRotation = Quaternion.Euler(0, 0, -24f);
+            Piece("Rift fracture molten core", PrimitiveType.Sphere, Vector3.zero,
+                new Vector3(0.34f, 0.39f, 0.23f), new Color32(255, 219, 134, 255), fracture.transform);
+            foreach (Renderer fracturePart in fracture.GetComponentsInChildren<Renderer>())
+            { fracturePart.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; fracturePart.receiveShadows = false; }
+            fracture.AddComponent<TimedWorldEffect>().Hold(0.48f);
+            for (int i = 0; i < 5; i++)
+            {
+                float angle = i * Mathf.PI * 2f / 5f;
+                Vector3 ray = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
+                GameObject crack = Piece("Rift hammer ground fissure", PrimitiveType.Cube,
+                    ground + ray * 0.50f, new Vector3(0.88f, 0.026f, 0.12f),
+                    new Color32(91, 73, 54, 255), effectsRoot);
+                crack.transform.rotation = Quaternion.Euler(0, -angle * Mathf.Rad2Deg, 0);
+                crack.AddComponent<TimedWorldEffect>().Hold(0.62f);
+            }
+            for (int i = 0; i < 7; i++)
+            {
+                float angle = i * Mathf.PI * 2f / 7f;
+                GameObject shard = Piece("Rift hammer stone shard", PrimitiveType.Cube,
+                    end + new Vector3(0, -0.22f, 0), new Vector3(0.25f, 0.20f, 0.19f),
+                    i % 2 == 0 ? new Color32(115, 111, 95, 255) : new Color32(178, 152, 111, 255), effectsRoot);
+                shard.transform.rotation = Quaternion.Euler(12f * i, angle * Mathf.Rad2Deg, 17f * i);
+                shard.AddComponent<TimedWorldEffect>().Debris(
+                    new Vector3(Mathf.Cos(angle) * 1.65f, 1.8f + i % 3 * 0.27f, Mathf.Sin(angle) * 1.65f), 0.65f);
+            }
+            RiftHammerAudio.PlayImpact(effectsRoot, end, level);
+            riftHammerImpactsPresented++;
+        }
+
+        private void PresentHearthShieldBlock(GameObject heroView)
+        {
+            Transform boss = null;
+            foreach (Transform part in heroView.GetComponentsInChildren<Transform>())
+                if (part.name == "Shield hearth boss") { boss = part; break; }
+            if (boss == null) return;
+            Vector3 center = boss.position + heroView.transform.forward * 0.10f;
+            SpawnSoftPulse(center, new Color32(230, 176, 103, 255), 0.20f, 0.92f, 0.28f, 0.38f);
+            SpawnBurst(center, new Color32(255, 226, 164, 255), 5, 0.76f, 0.27f);
+            hearthShieldBlocksPresented++;
+        }
+
+        private int chalicePulsesPresented;
+        private void SpawnChaliceRestoration(Vector3 center, int level)
+        {
+            GameObject seal = Ring("Chalice restorative seal", Mint, effectsRoot);
+            seal.transform.position = center;
+            Material aura = Resources.Load<Material>("SpellAura");
+            if (aura != null) TintSpellRenderer(seal.GetComponent<Renderer>(), aura, Mint, 0.38f, 0f);
+            seal.AddComponent<TimedWorldEffect>().Pulse(0.15f, 1.1f + level * 0.13f, 0.55f);
+            chalicePulsesPresented++;
         }
 
         private void MarkFrozenDefense(Building building, GameObject view)
@@ -547,6 +733,8 @@ namespace Hearthhold.UnityClient
                 GameObject view = unitViews[nearest.Id];
                 Flash(view, color);
                 ModelActionAnimator action = view.GetComponent<ModelActionAnimator>(); if (action != null) action.Hit();
+                if (color == Danger && nearest.IsHero && BattleHeroEquipmentLevel(nearest.HeroKind, EquipmentKind.HearthShield) > 0)
+                    PresentHearthShieldBlock(view);
             }
         }
 
@@ -626,17 +814,25 @@ namespace Hearthhold.UnityClient
                 Debug.LogError("HEARTHHOLD_SPELL_FIELDS_FAILED: could not cast all three sustained fields.");
         }
 
-        private int feedbackHeroId = -1, feedbackPetId = -1, feedbackFrozenDefenseId = -1;
-        private void PrepareCombatFeedbackSmoke()
+        private int feedbackHeroId = -1, feedbackPetId = -1, feedbackFrozenDefenseId = -1, feedbackHammerWallId = -1;
+        private void PrepareCombatFeedbackSmoke(bool equipmentCombat = false)
         {
             if (session.Village.Count(BuildingKind.HeroHall) == 0) session.Village.Add(BuildingKind.HeroHall, 5, 5);
             if (session.Village.Count(BuildingKind.PetLodge) == 0) session.Village.Add(BuildingKind.PetLodge, 9, 5);
             session.Village.EnsureHeroes();
             session.Village.HeroLevels[0] = 2; session.Village.PetLevels[0] = 2; session.Village.HeroPetAssignments[0] = 0;
+            if (equipmentCombat) session.Village.HeroPetAssignments[0] = -1;
+            session.Village.EnsureEquipment();
+            EquipmentKind first = equipmentCombat ? EquipmentKind.HearthShield : EquipmentKind.MarchTorch;
+            EquipmentKind second = equipmentCombat ? EquipmentKind.RiftHammer : EquipmentKind.EmberChalice;
+            session.Village.EquipmentLevels[(int)first] = 1;
+            session.Village.EquipmentLevels[(int)second] = 1;
+            session.Village.HeroEquipmentSlots[0] = (int)first;
+            session.Village.HeroEquipmentSlots[1] = (int)second;
             session.Village.EnsureTechnology(); session.Village.SpellLevels[(int)SpellKind.Freeze] = 1;
             session.BeginBattle();
             if (session.Battle == null || !session.Battle.DeployHeroNearest(HeroKind.EmberWarden, 9500, 30000)
-                || !session.Battle.CastHeroSkill(HeroKind.EmberWarden))
+                || !equipmentCombat && !session.Battle.CastHeroSkill(HeroKind.EmberWarden))
             { Debug.LogError("HEARTHHOLD_COMBAT_FEEDBACK_FAILED: hero skill could not be activated."); return; }
             foreach (Unit unit in session.Battle.Units)
             {
@@ -649,21 +845,106 @@ namespace Hearthhold.UnityClient
             RebuildBuildings(); SyncBattle();
             Unit pet = session.Battle.Units.Find(delegate(Unit unit) { return unit.Id == feedbackPetId; });
             if (pet != null) { FlashUnit(pet.X, pet.Z, Danger); FlashUnit(pet.X, pet.Z, Danger); }
-            focus = new Vector3(13, 0, 27); worldCamera.orthographicSize = 11.5f; MoveCamera();
+            focus = equipmentCombat ? new Vector3(11, 0, 29) : new Vector3(13, 0, 27);
+            worldCamera.orthographicSize = equipmentCombat ? 7.6f : 11.5f; MoveCamera();
         }
 
         private bool VerifyCombatFeedbackSmoke()
         {
             GameObject hero, pet, defense;
+            HeroCommandVisual commandVisual = unitViews.TryGetValue(feedbackHeroId, out hero) && hero != null
+                ? hero.GetComponentInChildren<HeroCommandVisual>() : null;
             bool ready = unitViews.TryGetValue(feedbackHeroId, out hero) && hero != null
-                && hero.transform.Find("Hero command aura") != null
+                && commandVisual != null
+                && HasEquipmentMarker(hero, "Equipped MarchTorch") && HasEquipmentMarker(hero, "Equipped EmberChalice")
+                && Mathf.Abs(commandVisual.CommandRadius - 6f) < 0.01f
+                && chalicePulsesPresented > 0
                 && unitViews.TryGetValue(feedbackPetId, out pet) && pet != null
                 && pet.GetComponent<ModelHitFlash>() != null && pet.GetComponent<ModelHitFlash>().AppearanceRestored()
                 && buildingViews.TryGetValue(feedbackFrozenDefenseId, out defense) && defense != null
                 && defense.transform.Find("Frozen defense seal") != null;
-            if (ready) Debug.Log("HEARTHHOLD_COMBAT_FEEDBACK_READY: pet tint restored, hero aura active, frozen defense marked.");
+            if (ready) Debug.Log("HEARTHHOLD_COMBAT_FEEDBACK_READY: pet tint restored, equipped hero aura matches radius, chalice healing shown, frozen defense marked.");
             else Debug.LogError("HEARTHHOLD_COMBAT_FEEDBACK_FAILED: a combat visual is absent or pet tint was not restored.");
             return ready;
+        }
+
+        private bool VerifyEquipmentCombatSmoke()
+        {
+            GameObject hero;
+            if (!unitViews.TryGetValue(feedbackHeroId, out hero) || hero == null || session.Battle == null)
+            { Debug.LogError("HEARTHHOLD_EQUIPMENT_COMBAT_FAILED: hero view missing."); return false; }
+            Transform hammer = null;
+            foreach (Transform part in hero.GetComponentsInChildren<Transform>())
+                if (part.name == "Equipped RiftHammer") { hammer = part; break; }
+            bool mounted = hammer != null && hammer.parent != null
+                && (hammer.parent.name.EndsWith("hand.r", System.StringComparison.OrdinalIgnoreCase)
+                    || hammer.parent.name.EndsWith("lowerarm.r", System.StringComparison.OrdinalIgnoreCase)
+                    || hammer.parent.name.EndsWith("upperarm.r", System.StringComparison.OrdinalIgnoreCase));
+            Unit fighter = session.Battle.Units.Find(delegate(Unit unit) { return unit.Id == feedbackHeroId; });
+            Building wall = session.Battle.Buildings.Find(delegate(Building building) { return building.Id == feedbackHammerWallId; });
+            if (fighter == null || wall == null)
+            { Debug.LogError("HEARTHHOLD_EQUIPMENT_COMBAT_FAILED: hero or wall missing."); return false; }
+            Transform fracture = effectsRoot.Find("Rift hammer wall fracture");
+            Transform sound = effectsRoot.Find("Rift hammer impact audio");
+            AudioSource impactAudio = sound == null ? null : sound.GetComponent<AudioSource>();
+            ArticulatedModelAnimator animator = hero.GetComponent<ArticulatedModelAnimator>();
+            GameObject finishingWall;
+            bool wallHeld = pendingHammerWallFinishes.Contains(feedbackHammerWallId)
+                && buildingViews.TryGetValue(feedbackHammerWallId, out finishingWall)
+                && finishingWall != null && finishingWall.activeSelf;
+            if (fracture != null) Debug.Log("HEARTHHOLD_EQUIPMENT_COMBAT_FRACTURE_SCREEN: "
+                + worldCamera.WorldToScreenPoint(fracture.position));
+            bool ready = mounted && HasEquipmentMarker(hero, "Equipped HearthShield")
+                && riftHammerImpactsPresented > 0 && hearthShieldBlocksPresented > 0
+                && fracture != null && impactAudio != null && impactAudio.clip != null && RiftHammerAudio.PeakAmplitude > 0.25f
+                && animator != null && animator.HammerAttackCount > 0 && animator.HammerPeakPoseAngle > 40f
+                && wallHeld && wall.Health == 0;
+            if (ready) Debug.Log("HEARTHHOLD_EQUIPMENT_COMBAT_READY: right-arm hammer swing, timed wall fracture, impact audio and shield block.");
+            else Debug.LogError("HEARTHHOLD_EQUIPMENT_COMBAT_FAILED: mount=" + mounted
+                + " shards=" + riftHammerImpactsPresented + " shield=" + hearthShieldBlocksPresented
+                + " audio=" + (impactAudio != null) + " swing=" + (animator == null ? 0 : animator.HammerPeakPoseAngle)
+                + " heldWall=" + wallHeld);
+            return ready;
+        }
+
+        private bool TriggerEquipmentCombatSmokeImpact()
+        {
+            if (session.Battle == null) return false;
+            Unit fighter = session.Battle.Units.Find(delegate(Unit unit) { return unit.Id == feedbackHeroId; });
+            Building wall = ClosestBattleWall(fighter);
+            GameObject heroView;
+            if (fighter == null || wall == null || !unitViews.TryGetValue(feedbackHeroId, out heroView)) return false;
+            CombatEffect effect = new CombatEffect(fighter.X, fighter.Z, wall.CenterX, wall.CenterZ, 5, 2);
+            Unit attacker = FindRiftHammerWallAttacker(effect);
+            if (attacker == null) return false;
+            feedbackHammerWallId = wall.Id;
+            wall.Health = 0;
+            SyncBattle();
+            int finishingWallId = HoldFinishingHammerWall(effect);
+            if (finishingWallId != feedbackHammerWallId) return false;
+            ModelActionAnimator attack = heroView.GetComponent<ModelActionAnimator>();
+            if (attack == null) return false;
+            Vector3 target = new Vector3(wall.CenterX / 1000f, 1.15f, wall.CenterZ / 1000f);
+            attack.Attack(target);
+            FlashUnit(fighter.X, fighter.Z, Danger);
+            StartCoroutine(DelayedRiftHammerImpact(effect, target,
+                BattleHeroEquipmentLevel(attacker.HeroKind, EquipmentKind.RiftHammer), finishingWallId));
+            return true;
+        }
+
+        private Building ClosestBattleWall(Unit unit)
+        {
+            if (unit == null || session.Battle == null) return null;
+            Building nearest = null;
+            long best = long.MaxValue;
+            foreach (Building building in session.Battle.Buildings)
+            {
+                if (building.Kind != BuildingKind.Wall || building.Health <= 0) continue;
+                long dx = building.CenterX - unit.X, dz = building.CenterZ - unit.Z;
+                long distance = dx * dx + dz * dz;
+                if (distance < best) { best = distance; nearest = building; }
+            }
+            return nearest;
         }
 
         private GameObject artProofVanguard, artProofPet, artProofField;
@@ -807,16 +1088,78 @@ namespace Hearthhold.UnityClient
             hall.Level = lodge.Level = 2; hall.Health = hall.MaxHealth; lodge.Health = lodge.MaxHealth;
             session.Village.EnsureHeroes(); session.Village.HeroLevels[0] = 1; session.Village.PetLevels[0] = 1;
             session.Village.HeroPetAssignments[0] = 0; session.Village.Gold = session.Village.Capacity; session.Village.Crystal = session.Village.Capacity;
-            if (smokeEquipment)
+            if (smokeEquipment || smokeEquipmentAlt)
             {
                 session.Village.EnsureEquipment(); session.Village.Stardust = 240; session.Village.CoreSigils = 1; session.Village.HeroHallPermit = true;
-                session.Village.EquipmentLevels[0] = 1; session.Village.EquipmentLevels[1] = 1; session.Village.EquipmentLevels[2] = 1;
-                session.Village.HeroEquipmentSlots[0] = 0; session.Village.HeroEquipmentSlots[1] = 2;
-                heroEquipmentTab = true; selectedEquipmentKind = 2;
+                for (int i = 0; i < Rules.EquipmentNames.Length; i++) session.Village.EquipmentLevels[i] = 1;
+                session.Village.HeroEquipmentSlots[0] = smokeEquipmentAlt ? 1 : 0;
+                session.Village.HeroEquipmentSlots[1] = smokeEquipmentAlt ? 3 : 2;
+                heroEquipmentTab = true; selectedEquipmentKind = smokeEquipmentAlt ? 3 : 2;
             }
             RebuildBuildings(); rosterSelection = showPet ? 1 : 0; showHeroes = true;
             session.Notice = "英雄殿堂验收：动态名册、实时动作、数值详情、灵契与升级入口。";
             Debug.Log("HEARTHHOLD_HERO_HALL_SMOKE_READY: hall=2 lodge=2 selected=" + (showPet ? "pet" : "hero"));
+        }
+
+        private bool VerifyHeroEquipmentVisualSmoke()
+        {
+            VillageData village = session.Village;
+            Previews.EnsureRoster(village);
+            bool initial = Previews.HeroHasEquipment(EquipmentKind.HearthShield)
+                && Previews.HeroHasEquipment(EquipmentKind.MarchTorch)
+                && !Previews.HeroHasEquipment(EquipmentKind.RiftHammer)
+                && !Previews.HeroHasEquipment(EquipmentKind.EmberChalice);
+            int oldChaliceLevel = village.EquipmentLevels[(int)EquipmentKind.EmberChalice];
+            village.EquipmentLevels[(int)EquipmentKind.EmberChalice] = 2;
+            bool changed = session.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.RiftHammer)
+                && session.EquipHero(HeroKind.EmberWarden, 1, EquipmentKind.EmberChalice);
+            Previews.EnsureRoster(village);
+            bool swapped = changed && Previews.HeroHasEquipment(EquipmentKind.RiftHammer)
+                && Previews.HeroHasEquipment(EquipmentKind.EmberChalice)
+                && Previews.HeroHasEquipmentTier(EquipmentKind.EmberChalice, 2)
+                && !Previews.HeroHasEquipment(EquipmentKind.HearthShield)
+                && !Previews.HeroHasEquipment(EquipmentKind.MarchTorch);
+            int[] snapshotSlots = { (int)EquipmentKind.RiftHammer, (int)EquipmentKind.EmberChalice };
+            int[] snapshotLevels = { 1, 1, 1, 2 };
+            Unit hero = new Unit { IsHero = true, HeroKind = HeroKind.EmberWarden, HeroLevel = 1, Kind = TroopKind.Guardian };
+            GameObject battleView = modelViews.Troop(hero, unitsRoot, 1, snapshotSlots, snapshotLevels);
+            bool snapshot = HasEquipmentMarker(battleView, "Equipped RiftHammer")
+                && HasEquipmentMarker(battleView, "Equipped EmberChalice")
+                && !HasEquipmentMarker(battleView, "Equipped HearthShield");
+            battleView.SetActive(false); Destroy(battleView);
+            bool restored = session.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.HearthShield)
+                && session.EquipHero(HeroKind.EmberWarden, 1, EquipmentKind.MarchTorch);
+            village.EquipmentLevels[(int)EquipmentKind.EmberChalice] = oldChaliceLevel;
+            Previews.EnsureRoster(village);
+            restored = restored && Previews.HeroHasEquipment(EquipmentKind.HearthShield)
+                && Previews.HeroHasEquipment(EquipmentKind.MarchTorch);
+            if (initial && swapped && snapshot && restored)
+            {
+                Debug.Log("HEARTHHOLD_HERO_EQUIPMENT_VISUAL_READY: four distinct equipped models, tier change, preview refresh, battle snapshot.");
+                return true;
+            }
+            Debug.LogError("HEARTHHOLD_HERO_EQUIPMENT_VISUAL_FAILED: initial=" + initial + " swapped=" + swapped
+                + " snapshot=" + snapshot + " restored=" + restored);
+            return false;
+        }
+
+        private static bool HasEquipmentMarker(GameObject root, string name)
+        {
+            foreach (Transform part in root.GetComponentsInChildren<Transform>(true))
+                if (part.name == name) return true;
+            return false;
+        }
+
+        private bool VerifyHeroEquipmentAltSmoke()
+        {
+            Previews.EnsureRoster(session.Village);
+            bool ready = Previews.HeroHasEquipment(EquipmentKind.RiftHammer)
+                && Previews.HeroHasEquipment(EquipmentKind.EmberChalice)
+                && !Previews.HeroHasEquipment(EquipmentKind.HearthShield)
+                && !Previews.HeroHasEquipment(EquipmentKind.MarchTorch);
+            if (ready) Debug.Log("HEARTHHOLD_HERO_EQUIPMENT_ALT_READY: rift hammer and ember chalice on the live 3D hero.");
+            else Debug.LogError("HEARTHHOLD_HERO_EQUIPMENT_ALT_FAILED: incorrect hero equipment silhouette.");
+            return ready;
         }
 
         private void PrepareTrainingSmoke()
@@ -859,6 +1202,7 @@ namespace Hearthhold.UnityClient
         private void DisposePresentation()
         {
             if (ringMesh != null) Destroy(ringMesh);
+            if (heroCommandRingMesh != null) Destroy(heroCommandRingMesh);
             if (tileOutlineMesh != null) Destroy(tileOutlineMesh);
             if (tileMintMaterial != null) Destroy(tileMintMaterial);
             if (tileDangerMaterial != null) Destroy(tileDangerMaterial);
@@ -893,9 +1237,11 @@ namespace Hearthhold.UnityClient
         private Transform outer, inner;
         private Transform[] embers;
         private int initialTicks;
+        private float commandRadius;
+        internal float CommandRadius { get { return commandRadius; } }
 
-        public void Configure(CombatEffect effect, Transform boundary, Transform seal, Transform[] orbitingEmbers)
-        { source = effect; initialTicks = effect.Ticks; outer = boundary; inner = seal; embers = orbitingEmbers; }
+        public void Configure(CombatEffect effect, Transform boundary, Transform seal, Transform[] orbitingEmbers, float radius)
+        { source = effect; initialTicks = effect.Ticks; outer = boundary; inner = seal; embers = orbitingEmbers; commandRadius = radius; }
 
         private void Update()
         {
@@ -903,14 +1249,14 @@ namespace Hearthhold.UnityClient
             float elapsed = (initialTicks - source.Ticks) / (float)Rules.TicksPerSecond;
             float presence = Mathf.Clamp01(elapsed / 0.22f) * Mathf.Clamp01(source.Ticks / (Rules.TicksPerSecond * 0.5f));
             float breath = 1f + Mathf.Sin(elapsed * 4.2f) * 0.035f;
-            outer.localScale = Vector3.one * (5.5f * breath * presence);
-            inner.localScale = Vector3.one * (3.1f * (2f - breath) * presence);
+            outer.localScale = Vector3.one * (commandRadius * 2f * breath * presence);
+            inner.localScale = Vector3.one * (commandRadius * 0.62f * (2f - breath) * presence);
             outer.Rotate(0, Time.deltaTime * 20f, 0);
             inner.Rotate(0, -Time.deltaTime * 34f, 0);
             for (int i = 0; i < embers.Length; i++)
             {
                 float angle = i * Mathf.PI * 2f / embers.Length + elapsed * 1.1f;
-                float radius = 1.5f + i % 2 * 0.25f;
+                float radius = commandRadius * 0.3f + i % 2 * 0.25f;
                 embers[i].localPosition = new Vector3(Mathf.Cos(angle) * radius,
                     0.27f + i % 3 * 0.16f + Mathf.Sin(elapsed * 4f + i) * 0.11f, Mathf.Sin(angle) * radius);
                 embers[i].localScale = Vector3.one * (i % 2 == 0 ? 0.16f : 0.11f) * presence;

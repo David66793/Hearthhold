@@ -66,6 +66,8 @@ Hero and pet management uses a three-column "frontier dossier" layout: animated 
 
 Use live RenderTexture previews instead of pre-rendered GIF files: they preserve the current level ornaments, model, and action animation without duplicating art assets. Future heroes and pets extend the roster list rather than creating a new modal.
 
+The hero stage shows the actual equipped loadout, not a generic hero render. Equipping, removing, or upgrading an item refreshes both the visible 3D parts and the slot/status text on the next frame. Combat uses the departure snapshot, so later home changes cannot alter a battle already in progress. Equipment silhouettes must stay distinct at the normal preview size and at 1280×720.
+
 Building, troop, hero, and pet detail previews keep their camera still until the player holds the left mouse button and drags inside the preview. Horizontal drag orbits around the model; vertical drag tilts within a safe range. Release stops movement immediately. Idle model actions may continue, but neither the preview camera nor the model may auto-spin. The preview must consume this drag so it never moves the world or closes the modal.
 
 Identity changes must alter 3D silhouette, equipment, motion, or the causal VFX shape—not only hue. Read the matching dossier in `docs/entities/` before modifying an entity, and distinguish what is currently implemented from planned art. The shared rendering helpers can be reused; each entity still needs its own authored shape and behavior entry point.

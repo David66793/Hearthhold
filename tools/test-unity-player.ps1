@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('All', 'Home', 'HomeSmall', 'HudInput', 'HudInputSmall', 'WorldDrag', 'WorldDragSmall', 'BuildCatalog', 'BuildCatalogSmall', 'BuildCatalogDetail', 'WallRow', 'WallAxes', 'LayoutEditor', 'LayoutPointer', 'LayoutTray', 'LayoutEditorSmall', 'Heroes', 'Pets', 'Equipment', 'EquipmentSmall', 'ArtProof', 'ArtProofRotated', 'Campaign', 'CampaignSmall', 'Help', 'HelpSmall', 'Training', 'Research', 'ResearchSmall', 'ResearchDetail', 'ResearchDetailSmall', 'Progression', 'Battle', 'CombatFeedback', 'SpellFields', 'Deploy', 'Rotated', 'Detail', 'ArmyDetail', 'MainTroops', 'RemainingTroops', 'Casters', 'SavedVillage')][string]$Case = 'All',
+    [ValidateSet('All', 'Home', 'HomeSmall', 'HudInput', 'HudInputSmall', 'WorldDrag', 'WorldDragSmall', 'BuildCatalog', 'BuildCatalogSmall', 'BuildCatalogDetail', 'WallRow', 'WallAxes', 'LayoutEditor', 'LayoutPointer', 'LayoutTray', 'LayoutEditorSmall', 'Heroes', 'Pets', 'Equipment', 'EquipmentAlt', 'EquipmentCombat', 'EquipmentSmall', 'ArtProof', 'ArtProofRotated', 'Campaign', 'CampaignSmall', 'Help', 'HelpSmall', 'Training', 'Research', 'ResearchSmall', 'ResearchDetail', 'ResearchDetailSmall', 'Progression', 'Battle', 'CombatFeedback', 'SpellFields', 'Deploy', 'Rotated', 'Detail', 'ArmyDetail', 'MainTroops', 'RemainingTroops', 'Casters', 'SavedVillage')][string]$Case = 'All',
     [string]$PlayerPath = '',
     [string]$SaveSource = ''
 )
@@ -28,6 +28,7 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode,
     )
     if ($Mode -eq 'Battle') { $taskArguments += '-hearthhold-smoke-battle' }
     if ($Mode -eq 'CombatFeedback') { $taskArguments += '-hearthhold-smoke-combat-feedback' }
+    if ($Mode -eq 'EquipmentCombat') { $taskArguments += '-hearthhold-smoke-equipment-combat' }
     if ($Mode -eq 'SpellFields') { $taskArguments += '-hearthhold-smoke-spell-fields' }
     if ($Mode -eq 'Deploy') { $taskArguments += '-hearthhold-smoke-deploy' }
     if ($Mode -eq 'Campaign') { $taskArguments += '-hearthhold-smoke-campaign' }
@@ -50,6 +51,7 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode,
     if ($Mode -eq 'ArtProof') { $taskArguments += '-hearthhold-smoke-art-proof' }
     if ($Mode -eq 'ArtProofRotated') { $taskArguments += '-hearthhold-smoke-art-proof-rotated' }
     if ($Mode -eq 'Equipment') { $taskArguments += '-hearthhold-smoke-equipment' }
+    if ($Mode -eq 'EquipmentAlt') { $taskArguments += '-hearthhold-smoke-equipment-alt' }
     if ($Mode -eq 'Rotated') { $taskArguments += '-hearthhold-smoke-rotated' }
     if ($Mode -eq 'Detail') { $taskArguments += '-hearthhold-smoke-detail' }
     if ($Mode -eq 'ArmyDetail') { $taskArguments += '-hearthhold-smoke-army-detail' }
@@ -82,6 +84,11 @@ function Invoke-HearthholdSmoke([string]$Name, [string]$FileName, [string]$Mode,
     if (($Mode -eq 'Battle' -or $Mode -eq 'Deploy') -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_DEPLOY_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no successful central-click deployment marker: ' + $taskLog) }
     if ($Mode -eq 'Battle' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_ACTION_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no troop and defense action marker: ' + $taskLog) }
     if ($Mode -eq 'CombatFeedback' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_COMBAT_FEEDBACK_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no pet, hero and frozen-defense visual marker: ' + $taskLog) }
+    if ($Mode -eq 'EquipmentCombat' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_EQUIPMENT_COMBAT_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no hammer wall-impact and shield-block marker: ' + $taskLog) }
+    if ($Mode -eq 'EquipmentCombat' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HAMMER_WALL_FINISH_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no synchronized finishing-wall removal marker: ' + $taskLog) }
+    if ($Mode -eq 'Equipment' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HERO_EQUIPMENT_VISUAL_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no equipment swap and battle-snapshot visual marker: ' + $taskLog) }
+    if ($Mode -eq 'Equipment' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HERO_EQUIPMENT_INPUT_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no mouse-driven equipment interaction marker: ' + $taskLog) }
+    if ($Mode -eq 'EquipmentAlt' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HERO_EQUIPMENT_ALT_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no alternate equipment silhouette marker: ' + $taskLog) }
     if ($Mode -eq 'Campaign' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_CAMPAIGN_INPUT_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no mission, achievement and help interaction marker: ' + $taskLog) }
     if ($Mode -eq 'Help' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_HELP_UGUI_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no styled handbook marker: ' + $taskLog) }
     if ($Mode -eq 'Battle' -and -not (Select-String -LiteralPath $taskLog -Pattern 'HEARTHHOLD_FOCUS_SMOKE_READY:' -SimpleMatch -Quiet)) { throw ($Name + ' log has no tactical focus marker: ' + $taskLog) }
@@ -147,6 +154,8 @@ if ($Case -eq 'LayoutEditorSmall') { Invoke-HearthholdSmoke 'layout-editor-small
 if ($Case -eq 'All' -or $Case -eq 'Heroes') { Invoke-HearthholdSmoke 'heroes-v120' '83-unity-heroes-v120.png' 'Heroes' }
 if ($Case -eq 'All' -or $Case -eq 'Pets') { Invoke-HearthholdSmoke 'pets-v120' '84-unity-pets-v120.png' 'Pets' }
 if ($Case -eq 'All' -or $Case -eq 'Equipment') { Invoke-HearthholdSmoke 'equipment-v150' '95-unity-equipment-v150.png' 'Equipment' }
+if ($Case -eq 'All' -or $Case -eq 'EquipmentAlt') { Invoke-HearthholdSmoke 'equipment-alt-v161' '109-unity-equipment-alt-v161.png' 'EquipmentAlt' }
+if ($Case -eq 'All' -or $Case -eq 'EquipmentCombat') { Invoke-HearthholdSmoke 'equipment-combat-v162' '110-unity-equipment-combat-v162.png' 'EquipmentCombat' }
 if ($Case -eq 'EquipmentSmall') { Invoke-HearthholdSmoke 'equipment-small-v150' '96-unity-equipment-1280x720-v150.png' 'Equipment' 1280 720 }
 if ($Case -eq 'ArtProof') { Invoke-HearthholdSmoke 'art-proof-front-v151' '97-unity-art-proof-front-v151.png' 'ArtProof' }
 if ($Case -eq 'ArtProofRotated') { Invoke-HearthholdSmoke 'art-proof-reverse-v151' '98-unity-art-proof-reverse-v151.png' 'ArtProofRotated' }

@@ -17,7 +17,7 @@ namespace Hearthhold.UnityClient
         private GameObject[] rosterStages, rosterModels;
         private Camera[] rosterCameras;
         private RenderTexture[] rosterTextures;
-        private int[] rosterLevels;
+        private int[] rosterLevels, rosterEquipmentSignatures;
         private float rosterActionTimer;
         private float[] rosterYaw, rosterPitch;
         private bool rosterReadyLogged;
@@ -41,7 +41,7 @@ namespace Hearthhold.UnityClient
             if (rosterStages == null)
             {
                 rosterStages = new GameObject[count]; rosterModels = new GameObject[count]; rosterCameras = new Camera[count];
-                rosterTextures = new RenderTexture[count]; rosterLevels = new int[count];
+                rosterTextures = new RenderTexture[count]; rosterLevels = new int[count]; rosterEquipmentSignatures = new int[count];
                 rosterYaw = new float[count]; rosterPitch = new float[count];
                 for (int i = 0; i < count; i++) { rosterLevels[i] = -1; rosterYaw[i] = 320f; rosterPitch[i] = 26f; }
             }
@@ -49,6 +49,7 @@ namespace Hearthhold.UnityClient
             {
                 int level = i == 0 ? village.HeroLevels[0] : village.PetLevels[i - 1];
                 int visualLevel = Mathf.Max(1, level);
+                int equipmentSignature = i == 0 ? HeroEquipmentSignature(village) : 0;
                 if (rosterStages[i] == null)
                 {
                     int layer = 27 + i;
@@ -61,9 +62,10 @@ namespace Hearthhold.UnityClient
                     rosterCameras[i].backgroundColor = i == 0 ? new Color(0.18f, 0.12f, 0.08f) : new Color(0.08f, 0.19f, 0.17f);
                     rosterCameras[i].orthographic = true;
                 }
-                if (rosterModels[i] != null && rosterLevels[i] == visualLevel) continue;
-                if (rosterModels[i] != null) Object.Destroy(rosterModels[i]);
-                rosterModels[i] = i == 0 ? modelViews.HeroPreview(HeroKind.EmberWarden, visualLevel, rosterStages[i].transform)
+                if (rosterModels[i] != null && rosterLevels[i] == visualLevel && rosterEquipmentSignatures[i] == equipmentSignature) continue;
+                if (rosterModels[i] != null) { rosterModels[i].SetActive(false); Object.Destroy(rosterModels[i]); }
+                rosterModels[i] = i == 0 ? modelViews.HeroPreview(HeroKind.EmberWarden, visualLevel, rosterStages[i].transform,
+                    village.HeroEquipmentSlots, village.EquipmentLevels)
                     : modelViews.PetPreview((PetKind)(i - 1), visualLevel, rosterStages[i].transform);
                 SetPreviewLayer(rosterModels[i].transform, 27 + i);
                 Renderer[] renderers = rosterModels[i].GetComponentsInChildren<Renderer>(); bool started = false;
@@ -79,12 +81,47 @@ namespace Hearthhold.UnityClient
                 rosterCameras[i].orthographicSize = Mathf.Max(1.05f, bounds.size.y * 0.68f, span * 0.72f);
                 PlaceOrbitCamera(rosterCameras[i], rosterStages[i].transform.position, rosterYaw[i], rosterPitch[i], 8.7f);
                 rosterLevels[i] = visualLevel;
+                rosterEquipmentSignatures[i] = equipmentSignature;
             }
             if (!rosterReadyLogged)
             {
                 rosterReadyLogged = true;
                 Debug.Log("HEARTHHOLD_ROSTER_PREVIEW_READY: hero=" + Rules.Heroes.Length + " pets=" + Rules.Pets.Length);
             }
+        }
+
+        private static int HeroEquipmentSignature(VillageData village)
+        {
+            unchecked
+            {
+                int signature = 17;
+                for (int slot = 0; slot < 2; slot++)
+                {
+                    int kind = slot < village.HeroEquipmentSlots.Count ? village.HeroEquipmentSlots[slot] : -1;
+                    int level = kind >= 0 && kind < village.EquipmentLevels.Count ? village.EquipmentLevels[kind] : 0;
+                    signature = signature * 31 + kind;
+                    signature = signature * 31 + level;
+                }
+                return signature;
+            }
+        }
+
+        internal bool HeroHasEquipment(EquipmentKind kind)
+        {
+            if (rosterModels == null || rosterModels[0] == null) return false;
+            string marker = "Equipped " + kind;
+            foreach (Transform part in rosterModels[0].GetComponentsInChildren<Transform>(true))
+                if (part.name == marker) return true;
+            return false;
+        }
+
+        internal bool HeroHasEquipmentTier(EquipmentKind kind, int tier)
+        {
+            if (rosterModels == null || rosterModels[0] == null) return false;
+            string marker = "Equipped " + kind + " tier " + tier;
+            foreach (Transform part in rosterModels[0].GetComponentsInChildren<Transform>(true))
+                if (part.name == marker) return true;
+            return false;
         }
 
         // Returns true when a new model was created; the smoke host uses that to time animation capture.

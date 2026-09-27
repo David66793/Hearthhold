@@ -125,11 +125,13 @@ namespace Hearthhold.Core
             if (level <= 0) return "尚未制作";
             if (kind == EquipmentKind.HearthShield) return "防御伤害减免 " + (15 + level * 5) + "%";
             if (kind == EquipmentKind.RiftHammer) return "对城墙伤害 " + (1.5f + level * 0.5f).ToString("0.0") + " 倍";
-            if (kind == EquipmentKind.MarchTorch) return "号令半径 " + (5.5f + level * 0.5f).ToString("0.0") + " 格，持续 " + (8 + level) + " 秒";
+            if (kind == EquipmentKind.MarchTorch) return "号令半径 " + (HeroCommandRadius(level) / 1000f).ToString("0.0") + " 格，持续 " + (HeroCommandTicks(level) / TicksPerSecond) + " 秒";
             return "号令额外治疗友军 " + (10 + level * 5) + "%最大生命";
         }
         public static int EquipmentGoldCost(int currentLevel) { return currentLevel <= 0 ? 100 : currentLevel == 1 ? 200 : 350; }
         public static int EquipmentDustCost(int currentLevel) { return currentLevel <= 0 ? 100 : currentLevel == 1 ? 80 : 120; }
+        public static int HeroCommandRadius(int torchLevel) { return torchLevel > 0 ? 5500 + torchLevel * 500 : 5000; }
+        public static int HeroCommandTicks(int torchLevel) { return (8 + Math.Max(0, torchLevel)) * TicksPerSecond; }
         public static readonly string[] FormationNames = { "新兵集结", "均衡远征", "重甲破阵", "远程压制", "王庭突击·75" };
         public static readonly int[][] FormationCounts = {
             new[] { 22, 23, 0, 0, 0, 0, 0, 0 },

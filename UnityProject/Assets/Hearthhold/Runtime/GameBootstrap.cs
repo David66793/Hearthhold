@@ -18,7 +18,7 @@ namespace Hearthhold.UnityClient
         private readonly List<int> selectedWallIds = new List<int>();
         private readonly Dictionary<Color, Material> materials = new Dictionary<Color, Material>();
         private string savePath, fatalError, smokeCapturePath;
-        private bool smokeBattle, smokeCombatFeedback, smokeSpellFields, smokeArtProof, smokeArtProofRotated, smokeCampaign, smokeHelp, smokeTraining, smokeDeploy, smokeResearch, smokeResearchDetail, smokeProgression, smokeBuildCatalog, smokeBuildCatalogDetail, smokeWallRow, smokeWallAxes, smokeHeroes, smokePets, smokeEquipment, smokeLayoutEditor, smokeLayoutTray, smokeLayoutPointer, smokeRotated, smokeDetail, smokeArmyDetail, smokeHudInput, smokeWorldDrag;
+        private bool smokeBattle, smokeCombatFeedback, smokeEquipmentCombat, smokeSpellFields, smokeArtProof, smokeArtProofRotated, smokeCampaign, smokeHelp, smokeTraining, smokeDeploy, smokeResearch, smokeResearchDetail, smokeProgression, smokeBuildCatalog, smokeBuildCatalogDetail, smokeWallRow, smokeWallAxes, smokeHeroes, smokePets, smokeEquipment, smokeEquipmentAlt, smokeLayoutEditor, smokeLayoutTray, smokeLayoutPointer, smokeRotated, smokeDetail, smokeArmyDetail, smokeHudInput, smokeWorldDrag;
         private DateTime smokeRequestedUtc;
         private int smokeFrames;
         private float smokeDetailStartedAt;
@@ -66,6 +66,8 @@ namespace Hearthhold.UnityClient
             smokeHeroes = HasCommandLineFlag("-hearthhold-smoke-heroes");
             smokePets = HasCommandLineFlag("-hearthhold-smoke-pets");
             smokeEquipment = HasCommandLineFlag("-hearthhold-smoke-equipment");
+            smokeEquipmentAlt = HasCommandLineFlag("-hearthhold-smoke-equipment-alt");
+            smokeEquipmentCombat = HasCommandLineFlag("-hearthhold-smoke-equipment-combat");
             smokeDeploy = HasCommandLineFlag("-hearthhold-smoke-deploy");
             smokeRotated = HasCommandLineFlag("-hearthhold-smoke-rotated");
             smokeDetail = HasCommandLineFlag("-hearthhold-smoke-detail");
@@ -97,6 +99,7 @@ namespace Hearthhold.UnityClient
             buildingsRoot = new GameObject("Buildings").transform;
             unitsRoot = new GameObject("Units").transform;
             worldCamera = new GameObject("Isometric camera").AddComponent<Camera>();
+            if (FindAnyObjectByType<AudioListener>() == null) worldCamera.gameObject.AddComponent<AudioListener>();
             worldCamera.orthographic = true;
             worldCamera.orthographicSize = 17.5f;
             worldCamera.clearFlags = CameraClearFlags.SolidColor;
@@ -124,6 +127,7 @@ namespace Hearthhold.UnityClient
             if (smokeDeploy) PrepareDeploySmoke();
             else if (smokeBattle) PrepareBattleSmoke();
             else if (smokeCombatFeedback) PrepareCombatFeedbackSmoke();
+            else if (smokeEquipmentCombat) PrepareCombatFeedbackSmoke(true);
             else if (smokeSpellFields) PrepareSpellFieldSmoke();
             else if (smokeArtProof || smokeArtProofRotated) PrepareArtProofSmoke(smokeArtProofRotated);
             else if (smokeCampaign) PrepareCampaignSmoke();
@@ -134,7 +138,7 @@ namespace Hearthhold.UnityClient
             else if (smokeWallRow) PrepareWallRowSmoke();
             else if (smokeWallAxes) PrepareWallAxesSmoke();
             else if (smokeLayoutEditor || smokeLayoutTray || smokeLayoutPointer) PrepareLayoutEditorSmoke(smokeLayoutTray);
-            else if (smokeHeroes || smokePets || smokeEquipment) PrepareHeroesSmoke(smokePets);
+            else if (smokeHeroes || smokePets || smokeEquipment || smokeEquipmentAlt) PrepareHeroesSmoke(smokePets);
             else if (!string.IsNullOrEmpty(smokeCapturePath))
             {
                 PrepareHomeSmoke();
@@ -169,6 +173,7 @@ namespace Hearthhold.UnityClient
             }
             uiFont = Font.CreateDynamicFontFromOSFont(new[] { "Microsoft YaHei UI", "Microsoft YaHei", "Arial" }, 16);
             InitializeModernHud();
+            if (smokeEquipment) StartCoroutine(VerifyEquipmentModalInputSmoke());
             if (smokeCampaign) StartCoroutine(VerifyCampaignModalInputSmoke());
             if (smokeHelp) { help = true; RefreshModernHud(); RefreshHelpHud(); }
             if (smokeBuildCatalog || smokeBuildCatalogDetail)
@@ -197,6 +202,8 @@ namespace Hearthhold.UnityClient
             smokeFrames++;
             // Let imported attack takes finish before the detail smoke captures and exits.
             int captureFrame = smokeArmyDetail ? 180 : smokeBattle ? 90 : smokeCombatFeedback ? 45 : smokeSpellFields ? 75 : smokeArtProof || smokeArtProofRotated ? 55 : smokeDeploy ? 40 : 20;
+            if (smokeEquipmentCombat && smokeFrames == 17 && !TriggerEquipmentCombatSmokeImpact())
+            { Application.Quit(16); return; }
             if (smokeFrames >= captureFrame && smokeRequestedUtc == default(DateTime)
                 && (!smokeArmyDetail || Time.realtimeSinceStartup - smokeDetailStartedAt >= 2.6f))
             {
@@ -210,12 +217,17 @@ namespace Hearthhold.UnityClient
                     }
                     return;
                 }
+                if (smokeEquipment && !smokeEquipmentInputVerified) return;
+                if (smokeEquipmentCombat && riftHammerImpactsPresented == 0) return;
                 if (smokeWorldDrag && !VerifyWorldDragSmoke()) { Application.Quit(9); return; }
                 if (smokeHelp && (helpHudRoot == null || !helpHudRoot.activeInHierarchy || !ModernHomeHudOwnsOnGUI))
                 { Debug.LogError("HEARTHHOLD_HELP_UGUI_FAILED: the village handbook fell back to the legacy HUD."); Application.Quit(12); return; }
                 if (smokeHelp) Debug.Log("HEARTHHOLD_HELP_UGUI_SMOKE_READY: styled handbook remains over the live uGUI HUD.");
                 if (smokeSpellFields && !VerifySpellFieldSmoke()) { Application.Quit(10); return; }
                 if (smokeCombatFeedback && !VerifyCombatFeedbackSmoke()) { Application.Quit(13); return; }
+                if (smokeEquipmentCombat && !VerifyEquipmentCombatSmoke()) { Application.Quit(16); return; }
+                if (smokeEquipment && !VerifyHeroEquipmentVisualSmoke()) { Application.Quit(14); return; }
+                if (smokeEquipmentAlt && !VerifyHeroEquipmentAltSmoke()) { Application.Quit(15); return; }
                 if ((smokeArtProof || smokeArtProofRotated) && !VerifyArtProofSmoke()) { Application.Quit(11); return; }
                 if (smokeBattle && (troopActionsPresented == 0 || defenseActionsPresented == 0))
                 {
@@ -241,7 +253,9 @@ namespace Hearthhold.UnityClient
                 ScreenCapture.CaptureScreenshot(smokeCapturePath);
                 Debug.Log("HEARTHHOLD_SMOKE_CAPTURE_REQUESTED: " + smokeCapturePath);
             }
-            if (smokeRequestedUtc != default(DateTime) && smokeFrames > captureFrame && File.Exists(smokeCapturePath)
+            if (smokeRequestedUtc != default(DateTime) && smokeFrames > captureFrame
+                && (!smokeEquipmentCombat || pendingHammerWallFinishes.Count == 0 && hammerWallFinishesCompleted > 0)
+                && File.Exists(smokeCapturePath)
                 && new FileInfo(smokeCapturePath).Length > 1024 && File.GetLastWriteTimeUtc(smokeCapturePath) >= smokeRequestedUtc.AddSeconds(-1))
             {
                 Debug.Log("HEARTHHOLD_SMOKE_READY: " + smokeCapturePath);
@@ -505,14 +519,16 @@ namespace Hearthhold.UnityClient
             foreach (Building b in session.Battle.Buildings)
             {
                 GameObject obj;
-                if (buildingViews.TryGetValue(b.Id, out obj) && b.Health <= 0 && obj.activeSelf) obj.SetActive(false);
+                if (buildingViews.TryGetValue(b.Id, out obj) && b.Health <= 0 && obj.activeSelf
+                    && !pendingHammerWallFinishes.Contains(b.Id)) obj.SetActive(false);
             }
             foreach (Unit unit in session.Battle.Units)
             {
                 GameObject obj;
                 if (!unitViews.TryGetValue(unit.Id, out obj))
                 {
-                    obj = modelViews.Troop(unit, unitsRoot, unit.IsHero ? unit.HeroLevel : unit.IsPet ? unit.PetLevel : session.Battle.TroopLevels[(int)unit.Kind]);
+                    obj = modelViews.Troop(unit, unitsRoot, unit.IsHero ? unit.HeroLevel : unit.IsPet ? unit.PetLevel : session.Battle.TroopLevels[(int)unit.Kind],
+                        session.Battle.HeroEquipmentSlots, session.Battle.EquipmentLevels);
                     unitViews.Add(unit.Id, obj);
                     obj.transform.position = new Vector3(unit.X / 1000f, unit.Spec.Flying ? 1.8f : 0, unit.Z / 1000f);
                 }
@@ -550,9 +566,9 @@ namespace Hearthhold.UnityClient
         {
             // Smoke scenes deliberately reshape the in-memory village (and may overlap
             // fixtures to exercise rendering). They must never overwrite a real save.
-            if (smokeBattle || smokeCombatFeedback || smokeCampaign || smokeTraining || smokeDeploy || smokeResearch || smokeResearchDetail || smokeBuildCatalogDetail || smokeArtProof || smokeArtProofRotated ||
+            if (smokeBattle || smokeCombatFeedback || smokeEquipmentCombat || smokeCampaign || smokeTraining || smokeDeploy || smokeResearch || smokeResearchDetail || smokeBuildCatalogDetail || smokeArtProof || smokeArtProofRotated ||
                 smokeProgression || smokeBuildCatalog || smokeWallRow || smokeWallAxes || smokeLayoutEditor || smokeLayoutTray || smokeLayoutPointer ||
-                smokeHeroes || smokePets || smokeEquipment || smokeRotated || smokeDetail || smokeArmyDetail)
+                smokeHeroes || smokePets || smokeEquipment || smokeEquipmentAlt || smokeRotated || smokeDetail || smokeArmyDetail)
                 return;
 
             if (layoutEditing) CancelLayoutEditor(false);

@@ -812,6 +812,9 @@ internal static class CoreTests
         Check(s.Battle.DeployHeroNearest(HeroKind.EmberWarden, 500, 500), "Equipped hero deploys");
         Unit hero = s.Battle.Units[0];
         Check(s.Battle.CastHeroSkill(HeroKind.EmberWarden) && hero.FuryTicks == 180, "Level-one torch extends command to nine seconds");
+        Check(Rules.HeroCommandRadius(0) == 5000 && Rules.HeroCommandRadius(1) == 6000
+            && Rules.HeroCommandTicks(0) == 160 && Rules.HeroCommandTicks(1) == 180,
+            "Hero command radius and duration use one shared rule for battle and visuals");
         s.ReturnHome();
         Check(s.EquipHero(HeroKind.EmberWarden, 0, EquipmentKind.HearthShield), "Equipment can be replaced after battle");
         Battle shieldBattle = new Battle(Missions.Create(0), 0, new int[Rules.Troops.Length], null, null, new[] { 1 }, null, null, new[] { 1, 1, 0, 0 }, new[] { 0, 1 });
